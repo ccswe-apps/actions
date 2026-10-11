@@ -1,0 +1,40 @@
+name: npm-build
+description: npm ci, then the format:check, lint, test (when present) and build scripts.
+
+#   - uses: ccswe-apps/actions/.github/actions/npm-build@master   # $/... inside this repo
+#     with:
+#       build-env: |                 # optional: exported for `npm run build`
+#         SITE=https://staging.example.com
+#       committed-output: dist       # optional: fail unless the build leaves this path unchanged
+#
+# Package contract: scripts `format:check`, `lint` and `build`; `test` is optional.
+
+inputs:
+  working-directory:
+    description: Directory holding package.json.
+    default: .
+  node-version-file:
+    description: Node version file, relative to working-directory.
+    default: .nvmrc
+  build-env:
+    description: KEY=value lines exported for `npm run build`.
+    default: ''
+  committed-output:
+    description: Committed build output path, relative to working-directory; empty skips the check.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
+        cache: npm
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+    - shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        BUILD_ENV: ${{ inputs.build-env }}
+        COMMITTED_OUTPUT: ${{ inputs.committed-output }}
+      run: '"$GITHUB_ACTION_PATH/npm-build.sh"'

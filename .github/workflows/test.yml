@@ -265,8 +265,59 @@ jobs:
         run: |
           [ "$REPOS" = '["fixture/dotnet-app", "fixture/renamed"]' ] || { echo "::error::unexpected repos: $REPOS"; exit 1; }
 
+  fixture-npm-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/npm-build
+        with:
+          working-directory: test/fixtures/npm/app
+          build-env: |
+            SITE=https://staging.example.com
+
+      - name: Assert
+        working-directory: test/fixtures/npm/app
+        run: |
+          [ -f test-ran ] || { echo "::error::test script didn't run"; exit 1; }
+          [ "$(cat site-url)" = https://staging.example.com ] || { echo "::error::build-env not exported"; exit 1; }
+
+  fixture-npm-action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/npm-build
+        with:
+          working-directory: test/fixtures/npm/action
+          committed-output: dist
+
+  # A source change without a rebuilt dist/ must fail the committed-output check.
+  fixture-npm-action-stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: echo "console.log('changed');" > test/fixtures/npm/action/src/index.js
+
+      - id: build
+        continue-on-error: true
+        uses: $/.github/actions/npm-build
+        with:
+          working-directory: test/fixtures/npm/action
+          committed-output: dist
+
+      - name: Assert
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
     permissions:
       contents: read
       pull-requests: read

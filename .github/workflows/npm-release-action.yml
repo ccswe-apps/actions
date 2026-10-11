@@ -1,0 +1,113 @@
+name: npm-release-action
+
+# Reusable workflow for releasing a JavaScript GitHub Action from a version tag.
+#
+#   verify      the tag is on the default branch; npm-build (format:check, lint, test,
+#               build) with the committed-output check, so a tag never ships a stale dist/
+#   publish     GitHub Release with generated notes (prerelease when the tag has a `-`)
+#   major       move-major-tag.yml: point the major tag (v2) at the release; skipped
+#               for prereleases
+#
+# Caller shape (.github/workflows/release.yml):
+#
+#   on:
+#     push:
+#       tags:
+#         - 'v*.*.*'             # not the bare major tag, so moving it doesn't re-trigger
+#   permissions:
+#     contents: write
+#   concurrency:
+#     group: release-${{ github.ref }}
+#     cancel-in-progress: false
+#   jobs:
+#     release:
+#       uses: ccswe-apps/actions/.github/workflows/npm-release-action.yml@master
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      committed-output:
+        description: Committed build output path that must match the build.
+        type: string
+        default: dist
+      node-version-file:
+        type: string
+        default: .nvmrc
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      major: ${{ steps.version.outputs.major }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the tag is on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::$GITHUB_REF_NAME is not on $DEFAULT_BRANCH"
+            exit 1
+          fi
+
+      - uses: $/.github/actions/npm-build
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          committed-output: ${{ inputs.committed-output }}
+
+      - name: Major version and prerelease flag
+        id: version
+        run: |
+          echo "major=${GITHUB_REF_NAME%%.*}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          args=("$GITHUB_REF_NAME" -R "$REPO" --generate-notes --title "$GITHUB_REF_NAME")
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
+
+  major:
+    needs: [verify, publish]
+    if: needs.verify.outputs.prerelease == 'false'
+    permissions:
+      contents: read
+    uses: $/.github/workflows/move-major-tag.yml
+    with:
+      target: ${{ github.ref_name }}
+      major: ${{ needs.verify.outputs.major }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

@@ -17,6 +17,10 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `nanoframework-build-app.yml` | `build` (Windows) · `package-lock` · `packages-updated` (PRs) · `dependabot` |
 | `nanoframework-build-library.yml` | `build` (Windows, nuspec pack) → `publish` (nuget.org, when packable files changed; waits for the registration index) → `dependents` · `package-lock` · `packages-updated` (PRs) · `dependabot` |
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
+| `npm-build-app.yml` | `build` (npm ci, format:check, lint, test, build with build env) · `dependabot` |
+| `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
+| `npm-release-action.yml` | on a version tag: `verify` (tag on the default branch, `npm-build` with the `dist/` check) → `publish` (GitHub Release) → `major` (move the major tag) |
+| `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
 | `dispatch-dependents.yml` | nested in the library workflows: find dependents, send `update-dependencies` |
 | `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
 
@@ -37,6 +41,7 @@ Callers:
 - `setup-nanoframework`, `build-nanoframework`: nanobuild, MSBuild and NuGet CLI (Windows); locked restore and Release build stamped with nbgv.
 - `nanoframework-package-lock`, `nanoframework-packages-updated`: the nanoFramework PR checks.
 - `nuget-wait`: waits until a feed's flat container (exact restore) or registration index ("latest") lists every package version.
+- `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check.
 - `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact.
 - `version-changed`: whether any watched file changed in the pushed range.
 
@@ -48,8 +53,13 @@ Callers:
 - `fixture-gradle` (`gradle-build` against `test/fixtures/gradle`)
 - `fixture-dotnet-{pass,fail,no-tests,library,update}` (the .NET composites against `test/fixtures/dotnet`)
 - `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`)
+- `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`)
 
 Inside this repo, workflows reference the composites with `$/` (`uses: $/.github/actions/gradle-build`). That resolves to this repo at the running commit, even when the workflow is called from another owner.
+
+## npm script contract
+
+npm callers provide these `package.json` scripts: `format` (write), `format:check`, `lint`, `test` (single run; optional), `test:coverage`, `build`. CI runs `format:check`, `lint`, `test` and `build`.
 
 ## Migrating from `ccswe-nanoframework/actions-nanoframework`
 
