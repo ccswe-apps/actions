@@ -1,0 +1,200 @@
+name: android-build-app
+
+# Reusable workflow for Android app repos.
+#
+#   build       gradle-build with `tasks`; on a default-branch push, version-changed on `version-files`
+#   release     only when build reports a version change: signing (when a keystore is passed),
+#               assembleRelease, and the APK uploaded as the `release-apk` artifact
+#   dependabot  merge / update-behind (dependabot.yml)
+#
+# Outputs: release ('true' when the release job ran), version-name, version-code,
+# file-name (the APK inside the `release-apk` artifact). Distribution is the caller's
+# job, e.g. a second job gated on `needs.pipeline.outputs.release == 'true'`.
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: the required check is `pipeline / build`
+#       uses: ccswe-apps/actions/.github/workflows/android-build-app.yml@master
+#       with:
+#         app-module: my-app
+#         version-files: buildSrc/src/main/java/Versions.kt
+#         signing-key-alias: ${{ vars.SIGNING_KEY_ALIAS }}
+#       secrets:
+#         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}               # optional: private Maven feed
+#         SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+#         SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+#         SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# App-repo contract: gradlew at the root; the release signing config reads
+# keystore.properties (storeFile=release.keystore, storePassword, keyAlias,
+# keyPassword) at the root when present; assembleRelease produces exactly one
+# APK under <app-module>/build/outputs/apk/release.
+
+on:
+  workflow_call:
+    inputs:
+      app-module:
+        description: Gradle module that produces the APK.
+        type: string
+        required: true
+      version-files:
+        description: Space-separated files whose change on a default-branch push releases.
+        type: string
+        required: true
+      java-version:
+        type: string
+        default: '17'
+      tasks:
+        description: Gradle tasks for build (test, lint).
+        type: string
+        default: testReleaseUnitTest lintRelease
+      gradle-properties:
+        description: Lines appended to ~/.gradle/gradle.properties (CI tuning).
+        type: string
+        default: ''
+      signing-key-alias:
+        type: string
+        default: ''
+      timeout-minutes:
+        type: number
+        default: 30
+    secrets:
+      PACKAGES_PAT:
+        required: false
+      # Not available to Dependabot runs; only the release job reads them.
+      SIGNING_KEYSTORE_BASE64:
+        required: false
+      SIGNING_STORE_PASSWORD:
+        required: false
+      SIGNING_KEY_PASSWORD:
+        required: false
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+    outputs:
+      release:
+        value: ${{ jobs.build.outputs.release }}
+      version-name:
+        value: ${{ jobs.release.outputs.version-name }}
+      version-code:
+        value: ${{ jobs.release.outputs.version-code }}
+      file-name:
+        value: ${{ jobs.release.outputs.file-name }}
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: $/.github/actions/gradle-build
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        with:
+          java-version: ${{ inputs.java-version }}
+          tasks: ${{ inputs.tasks }}
+          gradle-properties: ${{ inputs.gradle-properties }}
+
+      - id: version
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: $/.github/actions/version-changed
+        with:
+          files: ${{ inputs.version-files }}
+
+  release:
+    needs: build
+    if: needs.build.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      version-name: ${{ steps.meta.outputs.version-name }}
+      version-code: ${{ steps.meta.outputs.version-code }}
+      file-name: ${{ steps.meta.outputs.file-name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up release signing
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ inputs.signing-key-alias }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_KEYSTORE_BASE64" ]; then
+            echo "No keystore passed; building without release signing."
+            exit 0
+          fi
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > release.keystore
+          cat > keystore.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$SIGNING_STORE_PASSWORD
+          keyAlias=$SIGNING_KEY_ALIAS
+          keyPassword=$SIGNING_KEY_PASSWORD
+          EOF
+
+      - uses: $/.github/actions/gradle-build
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        with:
+          java-version: ${{ inputs.java-version }}
+          tasks: assembleRelease
+          gradle-properties: ${{ inputs.gradle-properties }}
+
+      - id: meta
+        name: Read release metadata
+        env:
+          APK_DIR: ${{ inputs.app-module }}/build/outputs/apk/release
+        run: |
+          meta="$APK_DIR/output-metadata.json"
+          if ! jq -e '.elements | length == 1' "$meta" >/dev/null; then
+            echo "::error::Expected exactly one APK in $meta (ABI splits/flavors are not supported)"
+            exit 1
+          fi
+          file_name=$(jq -r '.elements[0].outputFile' "$meta")
+          if [ ! -f "$APK_DIR/$file_name" ]; then
+            echo "::error::Release APK not found at $APK_DIR/$file_name"
+            exit 1
+          fi
+          {
+            echo "version-name=$(jq -r '.elements[0].versionName' "$meta")"
+            echo "version-code=$(jq -r '.elements[0].versionCode' "$meta")"
+            echo "file-name=$file_name"
+            echo "file-path=$APK_DIR/$file_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-apk
+          path: ${{ steps.meta.outputs.file-path }}
+          if-no-files-found: error
+
+      - name: Clean up signing material
+        if: always()
+        run: rm -f release.keystore keystore.properties
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

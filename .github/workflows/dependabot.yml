@@ -1,0 +1,85 @@
+name: dependabot
+
+# Reusable workflow: merges non-major Dependabot PRs once required checks pass,
+# and updates auto-merge bot PRs left behind base by a merge.
+#
+# Caller shape (in a CI workflow that runs on push and pull_request):
+#
+#   dependabot:
+#     needs: build              # merge only after the build passed
+#     permissions:              # caller's ceiling must allow these
+#       contents: read
+#       pull-requests: read
+#     uses: ccswe-apps/actions/.github/workflows/dependabot.yml@master   # $/... inside this repo
+#     secrets:
+#       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#       AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# AUTOMATION_APP_ID / AUTOMATION_APP_KEY (andy-the-messenger-robot) must exist
+# as both Actions and Dependabot secrets: Dependabot-triggered runs read the latter.
+# Secrets don't inherit across orgs; pass them by name.
+
+on:
+  workflow_call:
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  merge:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          # Branch updates by the merge step re-sign commits; the job already requires a dependabot[bot] PR.
+          skip-commit-verification: true
+
+      - id: app-token
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+
+      # Auto-merge waits for every required check; repos without branch protection can't use it, so merge directly.
+      # A branch behind base (strict checks) is updated; the re-run CI comes back here.
+      - if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: |
+          gh pr merge "$PR_URL" --squash --auto || gh pr merge "$PR_URL" --squash
+          if [ "$(gh pr view "$PR_URL" --json state,mergeStateStatus -q '.state + .mergeStateStatus')" = OPENBEHIND ]; then
+            gh pr update-branch "$PR_URL"
+          fi
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  update-behind:
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+
+      # A merge leaves other auto-merge bot PRs behind base; update them so CI re-runs and they merge.
+      - run: |
+          gh pr list -R "$REPO" --state open --limit 100 --json number,author,mergeStateStatus,autoMergeRequest \
+            -q '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND" and
+              (.author.login == "app/dependabot" or .author.login == "app/andy-the-messenger-robot")) | .number' |
+            while read -r n; do gh pr update-branch "$n" -R "$REPO"; done
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
