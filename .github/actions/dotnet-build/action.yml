@@ -92,7 +92,7 @@ runs:
       shell: bash
       env:
         SOLUTION_PATH: ${{ inputs.path }}
-      run: dotnet build "$SOLUTION_PATH" --configuration Release --no-restore
+      run: dotnet build "$SOLUTION_PATH" --configuration Release --no-restore /p:ContinuousIntegrationBuild=true
 
     - name: discover test projects
       id: tests

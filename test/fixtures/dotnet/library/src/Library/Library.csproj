@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Fixture.Library</PackageId>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Nerdbank.GitVersioning" PrivateAssets="all" />

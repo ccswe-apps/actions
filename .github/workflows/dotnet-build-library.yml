@@ -1,15 +1,16 @@
 name: dotnet-build-library
 
-# Reusable workflow for .NET library repos published to GitHub Packages (NuGet).
+# Reusable workflow for .NET library repos published to GitHub Packages or nuget.org.
 #
 # Pipeline:
-#   build       .github/actions/dotnet-build on the repo root (unit and
-#               integration tests), then .github/actions/dotnet-pack
-#   publish     push the packages to nuget.pkg.github.com/<owner> (default-branch
-#               push that changed something packable)
+#   build       .github/actions/dotnet-build on `path` (unit and integration tests),
+#               .github/actions/dotnet-pack, and dotnet-validate when validate-packages
+#   publish     push the packages (and .snupkg) to nuget.org when NUGET_API_KEY is
+#               passed, else nuget.pkg.github.com/<owner> (default-branch push that
+#               changed something packable), then wait until the feed serves them
 #   dependents  find dependents (`dependents` plus the listeners discovered in the
-#               `discover-dependents` accounts); after a publish, send each
-#               `update-dependencies`
+#               `discover-dependents` accounts); once the feed serves the
+#               packages, send each `update-dependencies`
 #   dependabot  dependabot.yml: merge non-major Dependabot PRs, update behind bot PRs
 #
 # Caller shape:
@@ -26,10 +27,11 @@ name: dotnet-build-library
 #         discover-dependents: |       # accounts to scan (trusted only; the App is public)
 #           <owner>
 #       secrets:
+#         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}   # optional: publish to nuget.org
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 #
-# Library-repo contract: the repo root holds one solution with the
+# Library-repo contract: `path` (default the repo root) holds one solution with the
 # *.UnitTests.csproj / *.IntegrationTests.csproj projects; IsPackable projects
 # reference the Nerdbank.GitVersioning package so packages carry the nbgv
 # version. A discovered dependent is a non-archived, non-template repo in a
@@ -48,10 +50,21 @@ on:
         description: Accounts (one per line) to scan for update-dependencies listeners; only accounts you trust.
         type: string
         default: ''
+      path:
+        description: Directory holding the solution.
+        type: string
+        default: .
+      validate-packages:
+        description: Run dotnet-validate (from the repo's tool manifest) on every package.
+        type: boolean
+        default: false
       dotnet-version:
         type: string
         default: '10.0.x'
     secrets:
+      NUGET_API_KEY:
+        description: nuget.org API key; when set, packages go to nuget.org instead of GitHub Packages.
+        required: false
       AUTOMATION_APP_ID:
         required: true
       AUTOMATION_APP_KEY:
@@ -77,18 +90,33 @@ jobs:
       - id: build
         uses: $/.github/actions/dotnet-build
         with:
+          path: ${{ inputs.path }}
           test-patterns: '*.UnitTests.csproj *.IntegrationTests.csproj'
           dotnet-version: ${{ inputs.dotnet-version }}
 
       - id: pack
         uses: $/.github/actions/dotnet-pack
         with:
+          path: ${{ inputs.path }}
           version: ${{ steps.build.outputs.package-version }}
+
+      # Source Link, determinism and compiler flags; the tool version comes from the repo's manifest.
+      - name: Validate packages
+        if: inputs.validate-packages
+        env:
+          DIRECTORY: ${{ steps.pack.outputs.directory }}
+        run: |
+          dotnet tool restore
+          for package in "$DIRECTORY"/*.nupkg; do
+            dotnet tool run dotnet-validate -- package local "$package"
+          done
 
       - uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
-          path: ${{ steps.pack.outputs.directory }}/*.nupkg
+          path: |
+            ${{ steps.pack.outputs.directory }}/*.nupkg
+            ${{ steps.pack.outputs.directory }}/*.snupkg
 
       - id: packable
         if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -134,10 +162,15 @@ jobs:
     needs: build
     if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
+    outputs:
+      indexed: ${{ steps.wait.outputs.indexed }}
+    env:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -148,14 +181,56 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
+      # nuget.org with NUGET_API_KEY, else GitHub Packages with GITHUB_TOKEN. A matching
+      # .snupkg is pushed with each .nupkg where the feed accepts symbols.
       - name: Push
+        id: push
         env:
           OWNER: ${{ github.repository_owner }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          dotnet nuget add source --name github --username "$GITHUB_ACTOR" --password "$GITHUB_TOKEN" \
-            --store-password-in-clear-text "https://nuget.pkg.github.com/${OWNER}/index.json"
-          dotnet nuget push "nupkg/*.nupkg" --source github --api-key "$GITHUB_TOKEN" --skip-duplicate
+          if [ -n "$NUGET_API_KEY" ]; then
+            source=https://api.nuget.org/v3/index.json
+            key="$NUGET_API_KEY"
+          else
+            source="https://nuget.pkg.github.com/${OWNER}/index.json"
+            key="$GITHUB_TOKEN"
+            dotnet nuget add source --name github --username "$GITHUB_ACTOR" --password "$GITHUB_TOKEN" \
+              --store-password-in-clear-text "$source"
+          fi
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          dotnet nuget push "nupkg/*.nupkg" --source "$source" --api-key "$key" --skip-duplicate
+
+      # Dependents restore the exact version, so wait until the feed's flat container
+      # (PackageBaseAddress) lists it; nuget.org indexing takes minutes.
+      - name: Wait until the feed serves the packages
+        id: wait
+        env:
+          SOURCE: ${{ steps.push.outputs.source }}
+          PACKAGES: ${{ needs.build.outputs.packages }}
+          VERSION: ${{ needs.build.outputs.package-version }}
+        run: |
+          auth=()
+          if [ -z "$NUGET_API_KEY" ]; then
+            auth=(-u "${GITHUB_ACTOR}:${GITHUB_TOKEN}")
+          fi
+          base="$(curl -sfL "${auth[@]}" "$SOURCE" | jq -r '[.resources[] | select(."@type" == "PackageBaseAddress/3.0.0")][0]."@id" // empty')"
+          if [ -z "$base" ]; then
+            echo "::error::no PackageBaseAddress/3.0.0 in $SOURCE"
+            exit 1
+          fi
+          deadline=$((SECONDS + 30 * 60))
+          for id in $(jq -r '.[]' <<< "$PACKAGES"); do
+            until curl -sfL "${auth[@]}" "${base%/}/${id,,}/index.json" | jq -e --arg v "${VERSION,,}" '.versions | index($v)' > /dev/null; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::warning::$id $VERSION not served after 30 minutes; skipping update-dependencies"
+                echo "indexed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              sleep 30
+            done
+            echo "$id $VERSION is served"
+          done
+          echo "indexed=true" >> "$GITHUB_OUTPUT"
 
   # Runs on every build (PRs log the discovered set); sends only after a publish.
   dependents:
@@ -201,7 +276,7 @@ jobs:
           echo "names=$(jq -r 'map(split("/")[1]) | join(",")' <<< "$repos")" >> "$GITHUB_OUTPUT"
 
       - id: write-token
-        if: needs.publish.result == 'success' && steps.merge.outputs.names != ''
+        if: needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' && steps.merge.outputs.names != ''
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.AUTOMATION_APP_ID }}
@@ -211,7 +286,7 @@ jobs:
           permission-contents: write
 
       - name: Send update-dependencies
-        if: needs.publish.result == 'success' && steps.merge.outputs.names != ''
+        if: needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' && steps.merge.outputs.names != ''
         env:
           GH_TOKEN: ${{ steps.write-token.outputs.token }}
           REPOS: ${{ steps.merge.outputs.repos }}
