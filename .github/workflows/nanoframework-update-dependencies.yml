@@ -1,0 +1,122 @@
+name: nanoframework-update-dependencies
+
+# Reusable workflow that updates nanoFramework NuGet packages with nanodu and opens a
+# PR as the andy-the-messenger-robot App (so the PR triggers checks). It then closes
+# older update PRs it supersedes and enables auto-merge on the new one unless it bumps
+# a package's major version. A dispatch's client_payload is ignored: nanodu updates
+# every package to its latest stable version.
+#
+# Caller shape (.github/workflows/nanoframework-update-dependencies.yml):
+#
+#   on:
+#     schedule:
+#       - cron: '30 20 * * *'
+#     repository_dispatch:
+#       types: [update-dependencies]   # sent by nanoframework-build-library.yml
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#   jobs:
+#     update-dependencies:
+#       uses: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml@master
+#       with:
+#         solution: My.sln
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      solution:
+        type: string
+        required: true
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  update-dependencies:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: $/.github/actions/setup-nanoframework
+
+      - name: Update dependencies
+        shell: bash
+        # nanodu's default git user (nfbot) also names the branch
+        # (nfbot/update-dependencies/<guid>), which manage-prs matches.
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+          DOTNET_NOLOGO: 'true'
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOLUTION: ${{ inputs.solution }}
+        run: |
+          tools="$(cygpath -u "$RUNNER_TEMP")/nanodu"
+          dotnet tool install nanodu --tool-path "$tools"
+          "$tools/nanodu" \
+            --working-directory "$GITHUB_WORKSPACE" \
+            --stable-packages \
+            --solutions-to-check "$SOLUTION" \
+            --branch-to-pr "$BRANCH" \
+            --git-hub-auth "$GH_TOKEN"
+
+  manage-prs:
+    needs: update-dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Close superseded PRs and enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          mapfile -t prs < <(gh pr list -R "$REPO" --state open --limit 100 --json number,headRefName,createdAt \
+            -q '[.[] | select(.headRefName | startswith("nfbot/update-dependencies/"))] | sort_by(.createdAt) | reverse | .[].number')
+          if [ ${#prs[@]} -eq 0 ]; then
+            exit 0
+          fi
+          newest="${prs[0]}"
+          for pr in "${prs[@]:1}"; do
+            gh pr close "$pr" -R "$REPO" --delete-branch --comment "Superseded by #${newest}."
+          done
+
+          # nanodu lists each change as "Bumps <id> from <old> to <new>".
+          majors="$(gh pr view "$newest" -R "$REPO" --json body -q .body |
+            grep -oE 'Bumps [^ ]+ from [0-9][^ ]* to [0-9][^ <]*' |
+            awk '{ split($4, a, "."); split($6, b, "."); if (a[1] != b[1]) print $2 " " $4 " -> " $6 }' || true)"
+          if [ -n "$majors" ]; then
+            echo "::notice::#${newest} bumps a major version; not auto-merging:"
+            echo "$majors"
+          else
+            gh pr merge "$newest" -R "$REPO" --auto --squash
+          fi

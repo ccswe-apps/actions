@@ -1,0 +1,94 @@
+name: nanoframework-build-app
+
+# Reusable workflow for nanoFramework app repos (deployed to devices outside CI).
+#
+#   build             (Windows) locked restore, Release build, unit tests (vstest-nanoframework)
+#   package-lock      PR only: every .nfproj in the solution has a packages.lock.json
+#   packages-updated  (Windows) PR only: `nuget update` leaves the tree unchanged
+#   dependabot        merge / update-behind (dependabot.yml)
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: checks are `pipeline / build`, `/ package-lock`, `/ packages-updated`
+#       uses: ccswe-apps/actions/.github/workflows/nanoframework-build-app.yml@master
+#       with:
+#         solution: My.sln
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      solution:
+        description: Path to the solution file.
+        type: string
+        required: true
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: $/.github/actions/setup-nanoframework
+
+      - uses: $/.github/actions/build-nanoframework
+        with:
+          solution: ${{ inputs.solution }}
+
+      - name: Run unit tests
+        uses: ccswe-nanoframework/vstest-nanoframework@v2
+
+  package-lock:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/nanoframework-package-lock
+        with:
+          solution: ${{ inputs.solution }}
+
+  packages-updated:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/setup-nanoframework
+
+      - uses: $/.github/actions/nanoframework-packages-updated
+        with:
+          solution: ${{ inputs.solution }}
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

@@ -22,8 +22,10 @@ updates:
   - package-ecosystem: github-actions
     directories:
       - /
+      - /.github/actions/build-nanoframework
       - /.github/actions/dotnet-build
       - /.github/actions/gradle-build
+      - /.github/actions/setup-nanoframework
     schedule:
       interval: weekly
       day: monday

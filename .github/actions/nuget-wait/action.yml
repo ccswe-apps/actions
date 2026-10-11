@@ -1,0 +1,57 @@
+name: nuget-wait
+description: Wait until a NuGet feed serves every package at a version.
+
+# Used by the library workflows before dispatching update-dependencies.
+#
+#   - id: wait
+#     uses: ccswe-apps/actions/.github/actions/nuget-wait@master   # $/... inside this repo
+#     with:
+#       source: https://api.nuget.org/v3/index.json   # the feed's service index
+#       packages: '["My.Package"]'
+#       version: 1.2.3
+#       index: flat-container                          # or registration
+#       username: ${{ github.actor }}                  # with password, for authenticated feeds
+#       password: ${{ github.token }}
+#
+# index: flat-container (PackageBaseAddress) is what an exact-version restore reads;
+# registration (RegistrationsBaseUrl/3.6.0) is what "latest" resolvers read. Polls every
+# 30s for up to 30 minutes; on timeout `indexed` is 'false' with a warning, not a failure.
+
+inputs:
+  source:
+    description: Feed service index URL.
+    required: true
+  packages:
+    description: JSON array of package ids.
+    required: true
+  version:
+    description: Package version.
+    required: true
+  index:
+    description: flat-container or registration.
+    default: flat-container
+  username:
+    description: Basic-auth user for the feed; empty for anonymous.
+    default: ''
+  password:
+    description: Basic-auth password or token for the feed.
+    default: ''
+
+outputs:
+  indexed:
+    description: "'true' when every package is served, else 'false'."
+    value: ${{ steps.wait.outputs.indexed }}
+
+runs:
+  using: composite
+  steps:
+    - id: wait
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        PACKAGES: ${{ inputs.packages }}
+        VERSION: ${{ inputs.version }}
+        INDEX: ${{ inputs.index }}
+        FEED_USERNAME: ${{ inputs.username }}
+        FEED_PASSWORD: ${{ inputs.password }}
+      run: '"$GITHUB_ACTION_PATH/nuget-wait.sh"'

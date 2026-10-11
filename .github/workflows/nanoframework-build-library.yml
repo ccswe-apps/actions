@@ -1,0 +1,208 @@
+name: nanoframework-build-library
+
+# Reusable workflow for nanoFramework library repos published to nuget.org.
+#
+#   build             (Windows) locked restore, Release build, unit tests (vstest-nanoframework),
+#                     `nuget pack` of every tracked *.nuspec (with .snupkg); on a default-branch
+#                     push, version-changed decides whether to publish
+#   package-lock      PR only: every .nfproj in the solution has a packages.lock.json
+#   packages-updated  (Windows) PR only: `nuget update` leaves the tree unchanged
+#   publish           push to nuget.org, then wait until its registration index lists every
+#                     package (nanodu resolves "latest" there)
+#   dependents        dispatch-dependents.yml: listeners calling nanoframework-update-dependencies.yml
+#   dependabot        merge / update-behind (dependabot.yml)
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: checks are `pipeline / build`, `/ package-lock`, `/ packages-updated`
+#       uses: ccswe-apps/actions/.github/workflows/nanoframework-build-library.yml@master
+#       with:
+#         solution: My.sln
+#         discover-dependents: |   # accounts to scan (trusted only; the App is public)
+#           <owner>
+#       secrets:
+#         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# Library-repo contract: a version.json (Nerdbank.GitVersioning); every tracked *.nuspec is a
+# package (`$commit$` is filled in); packages.config + packages.lock.json per project.
+
+on:
+  workflow_call:
+    inputs:
+      solution:
+        description: Path to the solution file.
+        type: string
+        required: true
+      dependents:
+        description: Repos (owner/name, one per line) to send update-dependencies after publishing.
+        type: string
+        default: ''
+      discover-dependents:
+        description: Accounts (one per line) to scan for update-dependencies listeners; only accounts you trust.
+        type: string
+        default: ''
+    secrets:
+      NUGET_API_KEY:
+        required: false
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.pack.outputs.version }}
+      packages: ${{ steps.pack.outputs.packages }}
+      publish: ${{ steps.packable.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: $/.github/actions/setup-nanoframework
+
+      - uses: $/.github/actions/build-nanoframework
+        with:
+          solution: ${{ inputs.solution }}
+
+      - name: Run unit tests
+        uses: ccswe-nanoframework/vstest-nanoframework@v2
+
+      - name: Pack NuGet packages
+        id: pack
+        shell: bash
+        run: |
+          if [ -z "${NBGV_NuGetPackageVersion:-}" ]; then
+            echo "::error::a nanoFramework library needs Nerdbank.GitVersioning (version.json)"
+            exit 1
+          fi
+          mapfile -t nuspecs < <(git ls-files '*.nuspec')
+          if [ ${#nuspecs[@]} -eq 0 ]; then
+            echo "::error::no .nuspec files are tracked"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/nuget-packages"
+          mkdir -p "$out"
+          for nuspec in "${nuspecs[@]}"; do
+            nuget pack "$nuspec" -Version "$NBGV_NuGetPackageVersion" -Symbols -SymbolPackageFormat snupkg \
+              -Properties "Configuration=Release;commit=$NBGV_GitCommitId" -OutputDirectory "$out"
+          done
+          packages="$(find "$out" -name "*.${NBGV_NuGetPackageVersion}.nupkg" -printf '%f\n' |
+            sed "s/\.${NBGV_NuGetPackageVersion}\.nupkg\$//" | jq -Rnc '[inputs]')"
+          echo "version=$NBGV_NuGetPackageVersion" >> "$GITHUB_OUTPUT"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: ${{ runner.temp }}/nuget-packages
+          if-no-files-found: error
+
+      - id: packable
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: $/.github/actions/version-changed
+        with:
+          files: src version.json Directory.Build.props nuget.config
+
+  package-lock:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/nanoframework-package-lock
+        with:
+          solution: ${{ inputs.solution }}
+
+  packages-updated:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/setup-nanoframework
+
+      - uses: $/.github/actions/nanoframework-packages-updated
+        with:
+          solution: ${{ inputs.solution }}
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      indexed: ${{ steps.wait.outputs.indexed }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: nupkg
+
+      # A matching .snupkg is pushed with each .nupkg.
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY is required to publish"
+            exit 1
+          fi
+          dotnet nuget push "nupkg/*.nupkg" --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" --skip-duplicate
+
+      - id: wait
+        uses: $/.github/actions/nuget-wait
+        with:
+          source: https://api.nuget.org/v3/index.json
+          packages: ${{ needs.build.outputs.packages }}
+          version: ${{ needs.build.outputs.version }}
+          index: registration
+
+  # Runs on every build (PRs log the discovered set); sends only once nuget.org serves the publish.
+  dependents:
+    needs: [build, publish]
+    if: always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '')
+    permissions:
+      contents: read
+    uses: $/.github/workflows/dispatch-dependents.yml
+    with:
+      dependents: ${{ inputs.dependents }}
+      discover-dependents: ${{ inputs.discover-dependents }}
+      updater: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml
+      version: ${{ needs.build.outputs.version }}
+      packages: ${{ needs.build.outputs.packages }}
+      send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

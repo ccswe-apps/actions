@@ -1,0 +1,31 @@
+name: build-nanoframework
+description: >-
+  Restores (locked when packages.lock.json files are tracked) and builds a nanoFramework solution in Release. Stamps
+  Nerdbank.GitVersioning versions when the repo has a version.json.
+
+# Windows only (MSBuild.exe, NuGet CLI). Run setup-nanoframework first.
+#
+#   - uses: ccswe-apps/actions/.github/actions/build-nanoframework@master   # $/... inside this repo
+#     with:
+#       solution: My.sln
+
+inputs:
+  solution:
+    description: Path to the solution file.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Nerdbank.GitVersioning
+      if: hashFiles('version.json') != ''
+      uses: dotnet/nbgv@v0.5.2
+      with:
+        setAllVars: true
+
+    - name: Restore and build
+      shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+        HAS_VERSION_JSON: ${{ hashFiles('version.json') != '' }}
+      run: '"$GITHUB_ACTION_PATH/build-nanoframework.sh"'
