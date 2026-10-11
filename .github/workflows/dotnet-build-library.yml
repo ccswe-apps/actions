@@ -81,7 +81,6 @@ jobs:
       package-version: ${{ steps.build.outputs.package-version }}
       packages: ${{ steps.pack.outputs.packages }}
       publish: ${{ steps.publish.outputs.publish }}
-      owners: ${{ steps.owners.outputs.owners }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -123,29 +122,6 @@ jobs:
         uses: $/.github/actions/version-changed
         with:
           files: src Directory.Build.props Directory.Packages.props version.json global.json
-
-      # One entry per account: explicit dependents plus whether to scan it.
-      - name: Plan dependents
-        id: owners
-        env:
-          DEPENDENTS: ${{ inputs.dependents }}
-          DISCOVER: ${{ inputs.discover-dependents }}
-        shell: python
-        run: |
-          import json, os, re
-          owners = {}
-          def entry(owner):
-              return owners.setdefault(owner.lower(), {"owner": owner, "discover": False, "repos": []})
-          for line in filter(None, (l.strip() for l in os.environ["DEPENDENTS"].splitlines())):
-              if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", line):
-                  raise SystemExit(f"::error::invalid dependents entry: {line}")
-              entry(line.split("/")[0])["repos"].append(line)
-          for line in filter(None, (l.strip() for l in os.environ["DISCOVER"].splitlines())):
-              if not re.fullmatch(r"[A-Za-z0-9-]+", line):
-                  raise SystemExit(f"::error::invalid discover-dependents entry: {line}")
-              entry(line)["discover"] = True
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"owners={json.dumps(list(owners.values()), separators=(',', ':'))}\n")
 
       # Docs- and test-only merges don't publish, so they don't fan out to dependents.
       - id: publish
@@ -200,106 +176,33 @@ jobs:
           echo "source=$source" >> "$GITHUB_OUTPUT"
           dotnet nuget push "nupkg/*.nupkg" --source "$source" --api-key "$key" --skip-duplicate
 
-      # Dependents restore the exact version, so wait until the feed's flat container
-      # (PackageBaseAddress) lists it; nuget.org indexing takes minutes.
-      - name: Wait until the feed serves the packages
-        id: wait
-        env:
-          SOURCE: ${{ steps.push.outputs.source }}
-          PACKAGES: ${{ needs.build.outputs.packages }}
-          VERSION: ${{ needs.build.outputs.package-version }}
-        run: |
-          auth=()
-          if [ -z "$NUGET_API_KEY" ]; then
-            auth=(-u "${GITHUB_ACTOR}:${GITHUB_TOKEN}")
-          fi
-          base="$(curl -sfL "${auth[@]}" "$SOURCE" | jq -r '[.resources[] | select(."@type" == "PackageBaseAddress/3.0.0")][0]."@id" // empty')"
-          if [ -z "$base" ]; then
-            echo "::error::no PackageBaseAddress/3.0.0 in $SOURCE"
-            exit 1
-          fi
-          deadline=$((SECONDS + 30 * 60))
-          for id in $(jq -r '.[]' <<< "$PACKAGES"); do
-            until curl -sfL "${auth[@]}" "${base%/}/${id,,}/index.json" | jq -e --arg v "${VERSION,,}" '.versions | index($v)' > /dev/null; do
-              if [ "$SECONDS" -ge "$deadline" ]; then
-                echo "::warning::$id $VERSION not served after 30 minutes; skipping update-dependencies"
-                echo "indexed=false" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              sleep 30
-            done
-            echo "$id $VERSION is served"
-          done
-          echo "indexed=true" >> "$GITHUB_OUTPUT"
+      # Dependents restore the exact version, so wait until the feed's flat container lists it.
+      - id: wait
+        uses: $/.github/actions/nuget-wait
+        with:
+          source: ${{ steps.push.outputs.source }}
+          packages: ${{ needs.build.outputs.packages }}
+          version: ${{ needs.build.outputs.package-version }}
+          username: ${{ secrets.NUGET_API_KEY == '' && github.actor || '' }}
+          password: ${{ secrets.NUGET_API_KEY == '' && github.token || '' }}
 
-  # Runs on every build (PRs log the discovered set); sends only after a publish.
+  # Runs on every build (PRs log the discovered set); sends only once the feed serves the publish.
   dependents:
-    name: dependents (${{ matrix.target.owner }})
     needs: [build, publish]
-    if: always() && needs.build.result == 'success' && needs.build.outputs.owners != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    if: always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '')
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(needs.build.outputs.owners) }}
-    steps:
-      - id: read-token
-        if: matrix.target.discover
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ secrets.AUTOMATION_APP_ID }}
-          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
-          owner: ${{ matrix.target.owner }}
-          permission-contents: read
-
-      - id: discover
-        if: matrix.target.discover
-        uses: $/.github/actions/discover-dependents
-        with:
-          owner: ${{ matrix.target.owner }}
-          updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
-          exclude: ${{ github.repository }}
-          token: ${{ steps.read-token.outputs.token }}
-
-      - name: Merge
-        id: merge
-        env:
-          EXPLICIT: ${{ toJSON(matrix.target.repos) }}
-          DISCOVERED: ${{ steps.discover.outputs.repos || '[]' }}
-        run: |
-          repos="$(jq -nc --argjson a "$EXPLICIT" --argjson b "$DISCOVERED" '$a + $b | unique')"
-          echo "dependents: $repos"
-          echo "repos=$repos" >> "$GITHUB_OUTPUT"
-          echo "names=$(jq -r 'map(split("/")[1]) | join(",")' <<< "$repos")" >> "$GITHUB_OUTPUT"
-
-      - id: write-token
-        if: needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' && steps.merge.outputs.names != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ secrets.AUTOMATION_APP_ID }}
-          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
-          owner: ${{ matrix.target.owner }}
-          repositories: ${{ steps.merge.outputs.names }}
-          permission-contents: write
-
-      - name: Send update-dependencies
-        if: needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' && steps.merge.outputs.names != ''
-        env:
-          GH_TOKEN: ${{ steps.write-token.outputs.token }}
-          REPOS: ${{ steps.merge.outputs.repos }}
-          SOURCE: ${{ github.repository }}
-          VERSION: ${{ needs.build.outputs.package-version }}
-          PACKAGES: ${{ needs.build.outputs.packages }}
-        run: |
-          payload="$(jq -nc --arg source "$SOURCE" --arg version "$VERSION" --argjson packages "$PACKAGES" \
-            '{event_type: "update-dependencies", client_payload: {source: $source, version: $version, packages: $packages}}')"
-          jq -r '.[]' <<< "$REPOS" | while read -r repo; do
-            echo "dispatching to $repo"
-            gh api "repos/${repo}/dispatches" --input - <<< "$payload"
-          done
+    uses: $/.github/workflows/dispatch-dependents.yml
+    with:
+      dependents: ${{ inputs.dependents }}
+      discover-dependents: ${{ inputs.discover-dependents }}
+      updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
+      version: ${{ needs.build.outputs.package-version }}
+      packages: ${{ needs.build.outputs.packages }}
+      send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 
   dependabot:
     needs: build

@@ -1,0 +1,144 @@
+name: dispatch-dependents
+
+# Reusable workflow (called by the library workflows): finds a library's dependents and,
+# when `send` is true, sends each `repository_dispatch: update-dependencies` with
+# client_payload {source, version, packages}.
+#
+#   plan        one entry per account: the explicit `dependents` plus whether to scan it
+#   dependents  per account (matrix): with discovery, an andy read token for the whole
+#               installation feeds discover-dependents, which keeps repos whose workflow takes
+#               `update-dependencies` and calls `updater`; with send, a contents-write token
+#               for just those repos sends the dispatch
+#
+# Runs on every build, so PR logs show the set (only kept repos are printed). andy is a
+# public App: only accounts the caller lists are scanned, never its installations.
+
+on:
+  workflow_call:
+    inputs:
+      dependents:
+        description: Repos (owner/name, one per line).
+        type: string
+        default: ''
+      discover-dependents:
+        description: Accounts (one per line) to scan; only accounts you trust.
+        type: string
+        default: ''
+      updater:
+        description: The update-dependencies workflow a listener must call (owner/repo/.github/workflows/file.yml).
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      packages:
+        description: JSON array of package ids.
+        type: string
+        required: true
+      send:
+        description: Send the dispatches (true only after a publish the feed serves).
+        type: boolean
+        default: false
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      owners: ${{ steps.owners.outputs.owners }}
+    steps:
+      - name: Plan dependents
+        id: owners
+        env:
+          DEPENDENTS: ${{ inputs.dependents }}
+          DISCOVER: ${{ inputs.discover-dependents }}
+        shell: python
+        run: |
+          import json, os, re
+          owners = {}
+          def entry(owner):
+              return owners.setdefault(owner.lower(), {"owner": owner, "discover": False, "repos": []})
+          for line in filter(None, (l.strip() for l in os.environ["DEPENDENTS"].splitlines())):
+              if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", line):
+                  raise SystemExit(f"::error::invalid dependents entry: {line}")
+              entry(line.split("/")[0])["repos"].append(line)
+          for line in filter(None, (l.strip() for l in os.environ["DISCOVER"].splitlines())):
+              if not re.fullmatch(r"[A-Za-z0-9-]+", line):
+                  raise SystemExit(f"::error::invalid discover-dependents entry: {line}")
+              entry(line)["discover"] = True
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"owners={json.dumps(list(owners.values()), separators=(',', ':'))}\n")
+
+  dependents:
+    name: dependents (${{ matrix.target.owner }})
+    needs: plan
+    if: needs.plan.outputs.owners != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.owners) }}
+    steps:
+      - id: read-token
+        if: matrix.target.discover
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          owner: ${{ matrix.target.owner }}
+          permission-contents: read
+
+      - id: discover
+        if: matrix.target.discover
+        uses: $/.github/actions/discover-dependents
+        with:
+          owner: ${{ matrix.target.owner }}
+          updater: ${{ inputs.updater }}
+          exclude: ${{ github.repository }}
+          token: ${{ steps.read-token.outputs.token }}
+
+      - name: Merge
+        id: merge
+        env:
+          EXPLICIT: ${{ toJSON(matrix.target.repos) }}
+          DISCOVERED: ${{ steps.discover.outputs.repos || '[]' }}
+        run: |
+          repos="$(jq -nc --argjson a "$EXPLICIT" --argjson b "$DISCOVERED" '$a + $b | unique')"
+          echo "dependents: $repos"
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -r 'map(split("/")[1]) | join(",")' <<< "$repos")" >> "$GITHUB_OUTPUT"
+
+      - id: write-token
+        if: inputs.send && steps.merge.outputs.names != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          owner: ${{ matrix.target.owner }}
+          repositories: ${{ steps.merge.outputs.names }}
+          permission-contents: write
+
+      - name: Send update-dependencies
+        if: inputs.send && steps.merge.outputs.names != ''
+        env:
+          GH_TOKEN: ${{ steps.write-token.outputs.token }}
+          REPOS: ${{ steps.merge.outputs.repos }}
+          SOURCE: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          payload="$(jq -nc --arg source "$SOURCE" --arg version "$VERSION" --argjson packages "$PACKAGES" \
+            '{event_type: "update-dependencies", client_payload: {source: $source, version: $version, packages: $packages}}')"
+          jq -r '.[]' <<< "$REPOS" | while read -r repo; do
+            echo "dispatching to $repo"
+            gh api "repos/${repo}/dispatches" --input - <<< "$payload"
+          done

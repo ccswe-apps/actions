@@ -10,7 +10,9 @@ Public reusable workflows (`.github/workflows/`) and composite actions (`.github
 ## Conventions
 
 - Workflow names: `<platform>-build-<app|library>.yml`. Publish and release are gated jobs inside them. Separate triggers get their own workflow (`dotnet-release-app.yml` on tags, `dotnet-update-dependencies.yml` on dispatch).
-- `dotnet-build-library.yml`'s discovery matches listeners by the literal string `ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml`; renaming that file breaks every dependent until their listeners change.
+- nanoFramework jobs that need nanobuild, MSBuild, the NuGet CLI or nanodu run on `windows-latest`; everything else on ubuntu. There's no nanoFramework fixture: validate changes with a throwaway CCSWE.nanoFramework or Emily.Clock caller PR at `@<branch>`.
+- The library workflows share `dispatch-dependents.yml` (nested; its check names gain a segment, none required) and the `nuget-wait` composite.
+- `dotnet-build-library.yml`'s discovery matches listeners by the literal string `ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml` (`nanoframework-build-library.yml`: `.../nanoframework-update-dependencies.yml`); renaming either file breaks every dependent until their listeners change.
 - Called jobs have no `name:`. The required check is `<caller job> / build`.
 - Same-repo references use `$/` (no `@ref`). actionlint 1.7.12 rejects `$/`; pass the `-ignore` patterns from `test.yml`.
 - Composite shell lives in `*.sh` (or `*.py`) next to `action.yml`, so the `shellcheck` self-test covers it. Inputs reach shell only through `env:`.

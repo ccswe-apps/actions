@@ -1,0 +1,21 @@
+name: nanoframework-packages-updated
+description: Fail unless `nuget update` leaves the tree unchanged (all packages at their latest versions).
+
+# Windows only; run setup-nanoframework first.
+#
+#   - uses: ccswe-apps/actions/.github/actions/nanoframework-packages-updated@master   # $/... inside this repo
+#     with:
+#       solution: My.sln
+
+inputs:
+  solution:
+    description: Path to the solution file.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+      run: '"$GITHUB_ACTION_PATH/packages-updated.sh"'
