@@ -17,7 +17,7 @@ name: dotnet-build-app
 #
 #   permissions:
 #     contents: read
-#     packages: write
+#     packages: write           # required even without publish-image: GitHub checks every job's permissions at startup
 #     checks: write
 #     pull-requests: read
 #   jobs:
