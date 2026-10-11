@@ -1,0 +1,177 @@
+name: dotnet-build-app
+
+# Reusable workflow for .NET app repos.
+#
+#   build       dotnet-build on `path` (nbgv, restore, build, *.UnitTests.csproj);
+#               skipped in template repos and on a derived repo's "Initial commit" push
+#   publish     only with publish-image on a default-branch push: docker build + push to
+#               ghcr.io/<owner>/<image-name> (version and latest tags)
+#   prune       keeps the last keep-image-versions image versions
+#   dependabot  merge / update-behind (dependabot.yml)
+#
+# Outputs: published ('true' when the image was pushed), version (nbgv SimpleVersion,
+# the image tag), image (ghcr.io/<owner>/<name>, lowercase, no tag). Deploys are the
+# caller's job, e.g. a second job gated on `needs.pipeline.outputs.published == 'true'`.
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     packages: write
+#     checks: write
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: the required check is `pipeline / build`
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-app.yml@master
+#       with:
+#         publish-image: true
+#       secrets:
+#         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}       # optional: private NuGet feed
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# App-repo contract: `path` holds one solution (.slnx/.sln) that includes the
+# *.UnitTests.csproj projects (*.IntegrationTests.csproj are not run). With
+# publish-image, a multi-stage Dockerfile at the repo root restores using the
+# NUGET_AUTH_TOKEN build-arg in its build stage only.
+
+on:
+  workflow_call:
+    inputs:
+      publish-image:
+        type: boolean
+        default: false
+      image-name:
+        description: GHCR image name; defaults to the repo name (lowercased).
+        type: string
+        default: ''
+      path:
+        description: Directory holding the solution.
+        type: string
+        default: src
+      dotnet-version:
+        type: string
+        default: '10.0.x'
+      keep-image-versions:
+        type: number
+        default: 10
+      timeout-minutes:
+        type: number
+        default: 20
+    secrets:
+      PACKAGES_PAT:
+        required: false
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+    outputs:
+      published:
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        value: ${{ jobs.build.outputs.version }}
+      image:
+        value: ${{ jobs.publish.outputs.image }}
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    # Skip template repos and a derived repo's "Initial commit" push (before its
+    # initialize workflow renames the placeholders); downstream jobs skip via needs.
+    if: ${{ !github.event.repository.is_template && github.event.head_commit.message != 'Initial commit' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      checks: write
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Builds as a test gate; the shipped binary is rebuilt and stamped in Docker.
+      - id: build
+        uses: $/.github/actions/dotnet-build
+        with:
+          path: ${{ inputs.path }}
+          nuget-auth-token: ${{ secrets.PACKAGES_PAT }}
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+  publish:
+    needs: build
+    if: inputs.publish-image && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      published: ${{ steps.done.outputs.published }}
+      image: ${{ steps.image.outputs.image }}
+      name: ${{ steps.image.outputs.name }}
+    steps:
+      # fetch-depth: 0: the Dockerfile COPYs .git and the nbgv MSBuild package
+      # stamps the shipped binary's version from full history.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Image references must be lowercase.
+      - id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ inputs.image-name || github.event.repository.name }}
+        run: |
+          echo "name=${NAME,,}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${OWNER,,}/${NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          provenance: false
+          build-args: |
+            NUGET_AUTH_TOKEN=${{ secrets.PACKAGES_PAT }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: |
+            ${{ steps.image.outputs.image }}:${{ needs.build.outputs.version }}
+            ${{ steps.image.outputs.image }}:latest
+
+      - id: done
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  prune:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Housekeeping; never fails the pipeline.
+    continue-on-error: true
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ needs.publish.outputs.name }}
+          package-type: container
+          min-versions-to-keep: ${{ inputs.keep-image-versions }}
+          delete-only-untagged-versions: false
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

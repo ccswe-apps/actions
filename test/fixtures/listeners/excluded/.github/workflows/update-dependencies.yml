@@ -1,0 +1,7 @@
+name: Update dependencies
+on:
+  repository_dispatch:
+    types: [update-dependencies]
+jobs:
+  update:
+    uses: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml@master

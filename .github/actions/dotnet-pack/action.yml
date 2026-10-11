@@ -1,0 +1,37 @@
+name: dotnet-pack
+description: Pack a built .NET solution and check every packable project produced its package.
+
+# Composite action used by dotnet-build-library.yml (from this repo:
+# `uses: $/.github/actions/dotnet-pack`). Run it after dotnet-build in the same
+# job; it packs with --no-build.
+#
+# Fails unless each IsPackable project in the solution produced
+# <PackageId>.<version>.nupkg, so a package that silently stops packing (or a
+# version mismatch) fails the build.
+
+inputs:
+  path:
+    description: Directory holding the solution.
+    required: false
+    default: '.'
+  version:
+    description: Expected package version (dotnet-build's package-version output).
+    required: true
+
+outputs:
+  directory:
+    description: Directory holding the .nupkg files.
+    value: ${{ steps.pack.outputs.directory }}
+  packages:
+    description: JSON array of the package ids.
+    value: ${{ steps.pack.outputs.packages }}
+
+runs:
+  using: composite
+  steps:
+    - id: pack
+      shell: bash
+      env:
+        SOLUTION_PATH: ${{ inputs.path }}
+        PACKAGE_VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/pack.sh"

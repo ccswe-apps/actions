@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Library.UnitTests/Library.UnitTests.csproj" />
+  <Project Path="Library/Library.csproj" />
+</Solution>

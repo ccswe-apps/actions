@@ -5,14 +5,15 @@ Public reusable workflows (`.github/workflows/`) and composite actions (`.github
 ## Placement
 
 - **Here:** owner-agnostic pieces, such as build composites, app and library workflows, and Dependabot.
-- **Owner CI repo:** deploys and distribution that only one owner uses (e.g. `midworld-apps/ci`: Rollout, GHCR/manifests). They run as extra caller jobs gated on this repo's workflow outputs. Never wrap these workflows in another reusable workflow: that renames the required check (`pipeline / build / build`).
+- **Owner repos:** deploys and distribution that only one owner uses (e.g. Midworld: `midworld-apps/ci` Rollout, `midworld-apps/manifests` bump). They run as extra caller jobs gated on this repo's workflow outputs. Never wrap these workflows in another reusable workflow: that renames the required check (`pipeline / build / build`).
 
 ## Conventions
 
-- Workflow names: `<platform>-build-<app|library>.yml`. Publish and release are gated jobs inside them.
+- Workflow names: `<platform>-build-<app|library>.yml`. Publish and release are gated jobs inside them. Separate triggers get their own workflow (`dotnet-release-app.yml` on tags, `dotnet-update-dependencies.yml` on dispatch).
+- `dotnet-build-library.yml`'s discovery matches listeners by the literal string `ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml`; renaming that file breaks every dependent until their listeners change.
 - Called jobs have no `name:`. The required check is `<caller job> / build`.
 - Same-repo references use `$/` (no `@ref`). actionlint 1.7.12 rejects `$/`; pass the `-ignore` patterns from `test.yml`.
-- Composite shell lives in `*.sh` next to `action.yml`, so the `shellcheck` self-test covers it. Inputs reach shell only through `env:`.
+- Composite shell lives in `*.sh` (or `*.py`) next to `action.yml`, so the `shellcheck` self-test covers it. Inputs reach shell only through `env:`.
 - Secrets are declared in `on.workflow_call.secrets` and passed by name to nested calls.
 - Pin external actions to their latest major. Dependabot covers `/` and every composite directory that uses external actions.
 

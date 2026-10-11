@@ -1,0 +1,38 @@
+name: update-package-versions
+description: Set packages to one version in every tracked Directory.Packages.props.
+
+# Composite action used by dotnet-update-dependencies.yml (from this repo:
+# `uses: $/.github/actions/update-package-versions`). Run it in a checkout;
+# it edits the working tree only.
+#
+# Rewrites the Version of each <PackageVersion Include="<id>"> whose id is in
+# `packages` (case-insensitive). Fails on an invalid version or id.
+
+inputs:
+  packages:
+    description: Space-separated package ids.
+    required: true
+  version:
+    description: SemVer version to set.
+    required: true
+
+outputs:
+  changed:
+    description: "'true' if any version changed."
+    value: ${{ steps.update.outputs.changed }}
+  major:
+    description: "'true' if any changed package's major version differs."
+    value: ${{ steps.update.outputs.major }}
+  summary:
+    description: One "Bumps <id> from <old> to <new>" line per change.
+    value: ${{ steps.update.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - id: update
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        VERSION: ${{ inputs.version }}
+      run: python3 "$GITHUB_ACTION_PATH/update-package-versions.py"
