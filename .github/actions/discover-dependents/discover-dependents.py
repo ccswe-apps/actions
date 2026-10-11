@@ -10,7 +10,8 @@ Live:  env OWNER, UPDATER, EXCLUDE (owner/name), GH_TOKEN (an installation
        token for OWNER; `gh api installation/repositories` lists its repos).
 Local: --local DIR, where each DIR/<name>/.github/workflows/*.yml is a repo
        named OWNER/<name> (for tests).
-Prints the result and writes `repos` (JSON array of owner/name) to $GITHUB_OUTPUT.
+Prints only the kept repos (callers may be public; scanned names may be private) and a
+skipped count, then writes `repos` (JSON array of owner/name) to $GITHUB_OUTPUT.
 """
 import json
 import os
@@ -97,22 +98,18 @@ def main():
     repos = local_repos(local, owner) if local else live_repos(owner)
     workflows = (lambda r: local_workflows(local, r)) if local else live_workflows
 
-    kept = []
+    kept, skipped = [], 0
     for full_name, archived, is_template in repos:
-        if full_name.split("/", 1)[0].lower() != owner.lower():
-            reason = "other owner"
-        elif archived:
-            reason = "archived"
-        elif is_template:
-            reason = "template"
-        elif full_name.lower() == exclude:
-            reason = "excluded"
+        candidate = (full_name.split("/", 1)[0].lower() == owner.lower() and not archived
+                     and not is_template and full_name.lower() != exclude)
+        listener = candidate and next((path for path, text in workflows(full_name) if listens(text, updater)), None)
+        if listener:
+            kept.append(full_name)
+            print(f"+ {full_name}: listener {listener}")
         else:
-            listener = next((path for path, text in workflows(full_name) if listens(text, updater)), None)
-            reason = f"listener {listener}" if listener else "no listener"
-            if listener:
-                kept.append(full_name)
-        print(f"{'+' if full_name in kept else '-'} {full_name}: {reason}")
+            skipped += 1
+
+    print(f"skipped: {skipped}")
 
     result = json.dumps(sorted(kept))
     print(f"repos={result}")
