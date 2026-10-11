@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/gradle-build
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Boise
+    cooldown:
+      default-days: 3
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+      actions-major:
+        update-types: [major]
+
+  - package-ecosystem: gradle
+    directories:
+      - /test/fixtures/gradle
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Boise
+    cooldown:
+      default-days: 3
+    groups:
+      gradle-minor-patch:
+        update-types: [minor, patch]
+      gradle-major:
+        update-types: [major]

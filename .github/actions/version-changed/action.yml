@@ -1,0 +1,40 @@
+name: version-changed
+description: Report whether any watched file changed in the pushed commit range.
+
+# Gates publish-on-version-bump jobs.
+#
+# Caller shape:
+#
+#   - uses: actions/checkout@<major>
+#     with:
+#       fetch-depth: 0            # the diff base must be present
+#   - id: version
+#     uses: ccswe-apps/actions/.github/actions/version-changed@master   # $/... inside this repo
+#     with:
+#       files: path/to/Versions.kt other/file
+#   - run: echo "${{ steps.version.outputs.changed }}"   # 'true' | 'false'
+#
+# Contract: runs on push events. Diffs github.event.before..github.sha; on a
+# zero/empty before SHA (first push, force-push) it falls back to HEAD^.
+# 'files' is space-separated; each entry is a `git diff` pathspec.
+
+inputs:
+  files:
+    description: Space-separated file path(s) to watch.
+    required: true
+
+outputs:
+  changed:
+    description: "'true' if any watched file changed in the push range, else 'false'."
+    value: ${{ steps.detect.outputs.changed }}
+
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        BEFORE: ${{ github.event.before }}
+        SHA: ${{ github.sha }}
+        FILES: ${{ inputs.files }}
+      run: '"$GITHUB_ACTION_PATH/version-changed.sh"'

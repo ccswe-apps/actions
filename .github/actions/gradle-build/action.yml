@@ -1,0 +1,60 @@
+name: gradle-build
+description: Set up a JDK and Gradle, then run Gradle tasks with the wrapper.
+
+# Caller shape:
+#
+#   - uses: actions/checkout@<major>
+#   - uses: ccswe-apps/actions/.github/actions/gradle-build@master   # $/... inside this repo
+#     env:
+#       PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}   # only if the build reads a private feed
+#     with:
+#       java-version: '21'
+#       tasks: assembleRelease test lintRelease
+#       gradle-properties: |                         # appended to ~/.gradle/gradle.properties
+#         org.gradle.jvmargs=-Xmx3g -XX:+UseG1GC
+#       coverage-path: build/reports/kover/          # uploaded as `coverage-report`, even on failure
+#
+# The user-level gradle.properties overrides the project's, so CI tuning goes in
+# gradle-properties. It's appended, never overwritten: setup-gradle may write there.
+
+inputs:
+  working-directory:
+    description: Directory holding gradlew.
+    default: .
+  java-version:
+    description: Temurin JDK version.
+    required: true
+  tasks:
+    description: Space-separated Gradle tasks, run in one invocation.
+    required: true
+  gradle-properties:
+    description: Lines appended to ~/.gradle/gradle.properties.
+    default: ''
+  coverage-path:
+    description: Coverage report path, relative to working-directory; empty skips the upload.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - uses: gradle/actions/setup-gradle@v6
+
+    - shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        TASKS: ${{ inputs.tasks }}
+        GRADLE_PROPERTIES: ${{ inputs.gradle-properties }}
+      run: '"$GITHUB_ACTION_PATH/gradle-build.sh"'
+
+    # A failing build stops before the report exists; the build failure is the signal.
+    - if: always() && inputs.coverage-path != ''
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/${{ inputs.coverage-path }}
+        if-no-files-found: warn

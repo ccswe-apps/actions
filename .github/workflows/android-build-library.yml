@@ -1,0 +1,115 @@
+name: android-build-library
+
+# Reusable workflow for Android library repos published to GitHub Packages (Maven).
+#
+#   build       gradle-build with `tasks`; on a default-branch push, version-changed on `version-files`
+#   publish     `./gradlew publish` with GITHUB_TOKEN, only when build reports a version change
+#   dependabot  merge / update-behind (dependabot.yml)
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     packages: write
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: the required check is `pipeline / build`
+#       uses: ccswe-apps/actions/.github/workflows/android-build-library.yml@master
+#       with:
+#         tasks: assembleRelease test lintRelease
+#         version-files: buildSrc/src/main/kotlin/_Versions_.kt
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# Library-repo contract: gradlew at the root; the Maven publication targets
+# maven.pkg.github.com/<owner>/<repo> with credentials from the GITHUB_USER /
+# GITHUB_TOKEN env vars.
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: '21'
+      tasks:
+        description: Gradle tasks for build (build, test, lint, coverage).
+        type: string
+        required: true
+      gradle-properties:
+        description: Lines appended to ~/.gradle/gradle.properties (CI tuning).
+        type: string
+        default: ''
+      coverage-path:
+        description: Coverage report path uploaded as `coverage-report`; empty skips it.
+        type: string
+        default: ''
+      version-files:
+        description: Space-separated files whose change on a default-branch push publishes.
+        type: string
+        required: true
+      timeout-minutes:
+        type: number
+        default: 45
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: $/.github/actions/gradle-build
+        with:
+          java-version: ${{ inputs.java-version }}
+          tasks: ${{ inputs.tasks }}
+          gradle-properties: ${{ inputs.gradle-properties }}
+          coverage-path: ${{ inputs.coverage-path }}
+
+      - id: version
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: $/.github/actions/version-changed
+        with:
+          files: ${{ inputs.version-files }}
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/gradle-build
+        env:
+          GITHUB_USER: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          java-version: ${{ inputs.java-version }}
+          tasks: publish
+          gradle-properties: ${{ inputs.gradle-properties }}
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
