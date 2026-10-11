@@ -70,8 +70,202 @@ jobs:
           grep -qx 'org.gradle.workers.max=2' "$HOME/.gradle/gradle.properties" || { echo "::error::gradle-properties not appended"; exit 1; }
           [ -f test/fixtures/gradle/build/libs/fixture.jar ] || { echo "::error::fixture.jar not built"; exit 1; }
 
+  fixture-dotnet-pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The default test-patterns skip Pass.IntegrationTests, which always fails.
+      - id: build
+        uses: $/.github/actions/dotnet-build
+        with:
+          path: test/fixtures/dotnet/pass/src
+          artifact-name: fixture-pass-results
+          report-name: fixture-pass-tests
+
+      - name: Assert
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+          PACKAGE_VERSION: ${{ steps.build.outputs.package-version }}
+        run: |
+          if [ -z "$VERSION" ] || [ -z "$PACKAGE_VERSION" ]; then
+            echo "::error::empty version outputs"
+            exit 1
+          fi
+          actual="$(find "$RUNNER_TEMP/TestResults" -name '*.trx' -printf '%f ' | xargs -n1 | sort | xargs)"
+          [ "$actual" = "Pass.UnitTests.trx" ] || { echo "::error::unexpected TRX files: $actual"; exit 1; }
+
+  fixture-dotnet-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: build
+        continue-on-error: true
+        uses: $/.github/actions/dotnet-build
+        with:
+          path: test/fixtures/dotnet/fail/src
+          test-patterns: '*.UnitTests.csproj *.IntegrationTests.csproj'
+          artifact-name: fixture-fail-results
+          report-name: ''
+
+      # The failing project runs first; the passing one must still run.
+      - name: Assert
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
+          actual="$(find "$RUNNER_TEMP/TestResults" -name '*.trx' -printf '%f ' | xargs -n1 | sort | xargs)"
+          [ "$actual" = "Fail.IntegrationTests.trx Fail.UnitTests.trx" ] || { echo "::error::unexpected TRX files: $actual"; exit 1; }
+
+  fixture-dotnet-no-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: $/.github/actions/dotnet-build
+        with:
+          path: test/fixtures/dotnet/no-tests/src
+          artifact-name: fixture-no-tests-results
+          report-name: fixture-no-tests-tests
+
+      - name: Assert
+        run: |
+          [ ! -e "$RUNNER_TEMP/TestResults" ] || { echo "::error::tests ran with no test projects"; exit 1; }
+
+  fixture-dotnet-library:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: build
+        uses: $/.github/actions/dotnet-build
+        with:
+          path: test/fixtures/dotnet/library/src
+          artifact-name: fixture-library-results
+          report-name: ''
+
+      - id: pack
+        uses: $/.github/actions/dotnet-pack
+        with:
+          path: test/fixtures/dotnet/library/src
+          version: ${{ steps.build.outputs.package-version }}
+
+      - name: Assert
+        env:
+          PACKAGES: ${{ steps.pack.outputs.packages }}
+          DIRECTORY: ${{ steps.pack.outputs.directory }}
+          PACKAGE_VERSION: ${{ steps.build.outputs.package-version }}
+        run: |
+          [ "$PACKAGES" = '["Fixture.Library"]' ] || { echo "::error::unexpected packages: $PACKAGES"; exit 1; }
+          [ -f "$DIRECTORY/Fixture.Library.$PACKAGE_VERSION.nupkg" ] || { echo "::error::package missing"; exit 1; }
+
+  fixture-dotnet-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: minor
+        uses: $/.github/actions/update-package-versions
+        with:
+          packages: nunit Microsoft.NET.Test.Sdk
+          version: 5.0.1
+
+      - name: Assert minor
+        env:
+          CHANGED: ${{ steps.minor.outputs.changed }}
+          MAJOR: ${{ steps.minor.outputs.major }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$MAJOR" != true ]; then
+            echo "::error::changed=$CHANGED major=$MAJOR (Test.Sdk 18 -> 5 is a major change)"
+            exit 1
+          fi
+          grep -q '<PackageVersion Include="NUnit" Version="5.0.1" />' test/fixtures/dotnet/Directory.Packages.props
+          git checkout -- .
+
+      - id: patch
+        uses: $/.github/actions/update-package-versions
+        with:
+          packages: NUnit
+          version: 5.0.1
+
+      - name: Assert patch
+        env:
+          CHANGED: ${{ steps.patch.outputs.changed }}
+          MAJOR: ${{ steps.patch.outputs.major }}
+          SUMMARY: ${{ steps.patch.outputs.summary }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$MAJOR" != false ]; then
+            echo "::error::changed=$CHANGED major=$MAJOR"
+            exit 1
+          fi
+          [ "$SUMMARY" = "Bumps NUnit from 5.0.0 to 5.0.1" ] || { echo "::error::summary: $SUMMARY"; exit 1; }
+          git checkout -- .
+
+      - id: unknown
+        uses: $/.github/actions/update-package-versions
+        with:
+          packages: Unknown.Package
+          version: 1.0.0
+
+      - name: Assert unknown
+        env:
+          CHANGED: ${{ steps.unknown.outputs.changed }}
+        run: |
+          [ "$CHANGED" = false ] || { echo "::error::changed=$CHANGED"; exit 1; }
+          git diff --exit-code
+
+      - id: invalid
+        continue-on-error: true
+        uses: $/.github/actions/update-package-versions
+        with:
+          packages: NUnit
+          version: '5.0'
+
+      - name: Assert invalid
+        env:
+          OUTCOME: ${{ steps.invalid.outcome }}
+        run: |
+          [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
+
+  fixture-discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Discover (local)
+        id: discover
+        env:
+          OWNER: fixture
+          UPDATER: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
+          EXCLUDE: fixture/excluded
+        run: python3 .github/actions/discover-dependents/discover-dependents.py --local test/fixtures/listeners
+
+      - name: Assert
+        env:
+          REPOS: ${{ steps.discover.outputs.repos }}
+        run: |
+          [ "$REPOS" = '["fixture/dotnet-app", "fixture/renamed"]' ] || { echo "::error::unexpected repos: $REPOS"; exit 1; }
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover]
     permissions:
       contents: read
       pull-requests: read

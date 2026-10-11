@@ -1,8 +1,28 @@
 version: 2
 updates:
+  - package-ecosystem: nuget
+    directories:
+      - /test/fixtures/dotnet/fail/src
+      - /test/fixtures/dotnet/library/src
+      - /test/fixtures/dotnet/no-tests/src
+      - /test/fixtures/dotnet/pass/src
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Boise
+    cooldown:
+      default-days: 3
+    groups:
+      nuget-minor-patch:
+        update-types: [minor, patch]
+      nuget-major:
+        update-types: [major]
+
   - package-ecosystem: github-actions
     directories:
       - /
+      - /.github/actions/dotnet-build
       - /.github/actions/gradle-build
     schedule:
       interval: weekly

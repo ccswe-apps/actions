@@ -1,0 +1,5 @@
+on:
+  workflow_dispatch:
+jobs:
+  update:
+    uses: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml@master

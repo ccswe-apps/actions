@@ -1,0 +1,128 @@
+name: dotnet-build
+description: Version with nbgv, then restore, build and test a .NET solution.
+
+# Composite action shared by the .NET app (and library) workflows. Reference it
+# from a workflow in this repo with `uses: $/.github/actions/dotnet-build` so it
+# resolves at the workflow's own commit.
+#
+# Caller shape:
+#
+#   - uses: actions/checkout@<major>
+#     with:
+#       fetch-depth: 0            # REQUIRED — nbgv computes the version from history
+#   - id: build
+#     uses: $/.github/actions/dotnet-build
+#     with:
+#       path: src
+#       nuget-auth-token: ${{ secrets.PACKAGES_PAT }}
+#   - run: echo "${{ steps.build.outputs.version }}"
+#
+# Contract: `path` holds one solution (or is the directory `dotnet restore`
+# resolves). Test projects are the tracked files under `path` matching any of
+# `test-patterns`; none matching warns and skips tests. A test failure fails the
+# action after every project has run.
+
+inputs:
+  path:
+    description: Directory holding the solution.
+    required: false
+    default: '.'
+  test-patterns:
+    description: Space-separated file-name globs selecting the test projects.
+    required: false
+    default: '*.UnitTests.csproj'
+  nuget-auth-token:
+    description: Token for private NuGet feeds (NUGET_AUTH_TOKEN during restore).
+    required: false
+    default: ''
+  dotnet-version:
+    description: SDK version for actions/setup-dotnet.
+    required: false
+    default: '10.0.x'
+  artifact-name:
+    description: Name of the uploaded test-results artifact.
+    required: false
+    default: dotnet-results
+  report-name:
+    description: Title of the dorny test report (job summary); empty skips the report.
+    required: false
+    default: dotnet-tests
+
+outputs:
+  version:
+    description: nbgv SimpleVersion.
+    value: ${{ steps.nbgv.outputs.SimpleVersion }}
+  package-version:
+    description: nbgv NuGetPackageVersion.
+    value: ${{ steps.nbgv.outputs.NuGetPackageVersion }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - id: nbgv
+      uses: dotnet/nbgv@v0.5.2
+      with:
+        path: ${{ inputs.path }}
+        setAllVars: true
+
+    - name: check version
+      shell: bash
+      env:
+        VERSION: ${{ steps.nbgv.outputs.SimpleVersion }}
+        PACKAGE_VERSION: ${{ steps.nbgv.outputs.NuGetPackageVersion }}
+      run: |
+        if [ -z "$VERSION" ] || [ -z "$PACKAGE_VERSION" ]; then
+          echo "::error::nbgv produced an empty version"
+          exit 1
+        fi
+
+    - name: dotnet restore
+      shell: bash
+      env:
+        SOLUTION_PATH: ${{ inputs.path }}
+        NUGET_AUTH_TOKEN: ${{ inputs.nuget-auth-token }}
+      run: dotnet restore "$SOLUTION_PATH"
+
+    # Versions are stamped by the Nerdbank.GitVersioning MSBuild package.
+    - name: dotnet build
+      shell: bash
+      env:
+        SOLUTION_PATH: ${{ inputs.path }}
+      run: dotnet build "$SOLUTION_PATH" --configuration Release --no-restore
+
+    - name: discover test projects
+      id: tests
+      shell: bash
+      env:
+        SOLUTION_PATH: ${{ inputs.path }}
+        TEST_PATTERNS: ${{ inputs.test-patterns }}
+      run: bash "$GITHUB_ACTION_PATH/discover-tests.sh"
+
+    - name: dotnet test
+      if: steps.tests.outputs.found == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/run-tests.sh"
+
+    - name: publish test results
+      if: ${{ always() && steps.tests.outputs.found == 'true' && inputs.report-name != '' }}
+      # fail-on-error doesn't cover errors creating the check run (e.g. a read-only token).
+      continue-on-error: true
+      uses: dorny/test-reporter@v3
+      with:
+        name: ${{ inputs.report-name }}
+        path: ${{ runner.temp }}/TestResults/*.trx
+        reporter: dotnet-trx
+        list-tests: failed
+        # The dotnet test step already fails on test failures.
+        fail-on-error: false
+
+    - name: upload test artifacts
+      if: ${{ always() && steps.tests.outputs.found == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/TestResults

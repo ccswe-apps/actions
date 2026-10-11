@@ -1,0 +1,106 @@
+name: dotnet-release-app
+
+# Reusable workflow for .NET desktop/CLI apps released as GitHub Release assets
+# on a version tag.
+#
+#   release     dotnet-build on `path` (tests and nbgv version), `dotnet publish` of each
+#               project for each runtime into one folder per runtime, packed as
+#               <asset-name>-<rid>.zip (win-*) or .tar.gz with SHA256SUMS.txt, then a
+#               GitHub Release for the tag (prerelease when the tag has a `-`)
+#
+# Asset names carry no version, so /releases/latest/download/<asset-name>-<rid>.<ext>
+# is a stable URL.
+#
+# Caller shape (.github/workflows/release.yml):
+#
+#   on:
+#     push:
+#       tags: [ 'v*' ]
+#   permissions:
+#     contents: write           # create the release and upload assets
+#     checks: write             # test report
+#   jobs:
+#     release:
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-release-app.yml@master
+#       with:
+#         projects: src/My.App.Desktop/My.App.Desktop.csproj src/My.App.Console/My.App.Console.csproj
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: Space-separated .csproj paths to publish.
+        type: string
+        required: true
+      rids:
+        description: Space-separated runtime identifiers.
+        type: string
+        default: win-x64 linux-x64 osx-x64 osx-arm64
+      asset-name:
+        description: Asset name prefix; defaults to the repo name.
+        type: string
+        default: ''
+      path:
+        description: Directory holding the solution.
+        type: string
+        default: src
+      dotnet-version:
+        type: string
+        default: '10.0.x'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: build
+        uses: $/.github/actions/dotnet-build
+        with:
+          path: ${{ inputs.path }}
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Publish and package
+        env:
+          PROJECTS: ${{ inputs.projects }}
+          RIDS: ${{ inputs.rids }}
+          ASSET_NAME: ${{ inputs.asset-name || github.event.repository.name }}
+        run: |
+          read -ra project_list <<< "$PROJECTS"
+          read -ra rid_list <<< "$RIDS"
+          mkdir -p artifacts
+          for rid in "${rid_list[@]}"; do
+            out="out/${rid}"
+            for project in "${project_list[@]}"; do
+              dotnet publish "$project" -c Release -r "$rid" --self-contained false \
+                /p:ContinuousIntegrationBuild=true -o "$out"
+            done
+            name="${ASSET_NAME}-${rid}"
+            if [[ "$rid" == win-* ]]; then
+              (cd "$out" && zip -qr "${GITHUB_WORKSPACE}/artifacts/${name}.zip" .)
+            else
+              tar -czf "artifacts/${name}.tar.gz" -C "$out" .
+            fi
+          done
+          (cd artifacts && sha256sum -- * > SHA256SUMS.txt)
+          ls -l artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.build.outputs.package-version }}
+          ASSET_NAME: ${{ inputs.asset-name || github.event.repository.name }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "$ASSET_NAME v$VERSION" \
+            --generate-notes \
+            "${prerelease[@]}" \
+            || gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber

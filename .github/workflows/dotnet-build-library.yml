@@ -1,0 +1,234 @@
+name: dotnet-build-library
+
+# Reusable workflow for .NET library repos published to GitHub Packages (NuGet).
+#
+# Pipeline:
+#   build       .github/actions/dotnet-build on the repo root (unit and
+#               integration tests), then .github/actions/dotnet-pack
+#   publish     push the packages to nuget.pkg.github.com/<owner> (default-branch
+#               push that changed something packable)
+#   dependents  find dependents (`dependents` plus the listeners discovered in the
+#               `discover-dependents` accounts); after a publish, send each
+#               `update-dependencies`
+#   dependabot  dependabot.yml: merge non-major Dependabot PRs, update behind bot PRs
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     checks: write
+#     packages: write
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: the required check is `pipeline / build`
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@master
+#       with:
+#         discover-dependents: |       # accounts to scan (trusted only; the App is public)
+#           <owner>
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# Library-repo contract: the repo root holds one solution with the
+# *.UnitTests.csproj / *.IntegrationTests.csproj projects; IsPackable projects
+# reference the Nerdbank.GitVersioning package so packages carry the nbgv
+# version. A discovered dependent is a non-archived, non-template repo in a
+# listed account whose workflow takes `repository_dispatch: update-dependencies`
+# and calls dotnet-update-dependencies.yml; dependents receive client_payload
+# {source, version, packages}. Scanned repo names appear in the caller's run logs.
+
+on:
+  workflow_call:
+    inputs:
+      dependents:
+        description: Repos (owner/name, one per line) to send update-dependencies after publishing.
+        type: string
+        default: ''
+      discover-dependents:
+        description: Accounts (one per line) to scan for update-dependencies listeners; only accounts you trust.
+        type: string
+        default: ''
+      dotnet-version:
+        type: string
+        default: '10.0.x'
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    outputs:
+      package-version: ${{ steps.build.outputs.package-version }}
+      packages: ${{ steps.pack.outputs.packages }}
+      publish: ${{ steps.publish.outputs.publish }}
+      owners: ${{ steps.owners.outputs.owners }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: build
+        uses: $/.github/actions/dotnet-build
+        with:
+          test-patterns: '*.UnitTests.csproj *.IntegrationTests.csproj'
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - id: pack
+        uses: $/.github/actions/dotnet-pack
+        with:
+          version: ${{ steps.build.outputs.package-version }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: ${{ steps.pack.outputs.directory }}/*.nupkg
+
+      - id: packable
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: $/.github/actions/version-changed
+        with:
+          files: src Directory.Build.props Directory.Packages.props version.json global.json
+
+      # One entry per account: explicit dependents plus whether to scan it.
+      - name: Plan dependents
+        id: owners
+        env:
+          DEPENDENTS: ${{ inputs.dependents }}
+          DISCOVER: ${{ inputs.discover-dependents }}
+        shell: python
+        run: |
+          import json, os, re
+          owners = {}
+          def entry(owner):
+              return owners.setdefault(owner.lower(), {"owner": owner, "discover": False, "repos": []})
+          for line in filter(None, (l.strip() for l in os.environ["DEPENDENTS"].splitlines())):
+              if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", line):
+                  raise SystemExit(f"::error::invalid dependents entry: {line}")
+              entry(line.split("/")[0])["repos"].append(line)
+          for line in filter(None, (l.strip() for l in os.environ["DISCOVER"].splitlines())):
+              if not re.fullmatch(r"[A-Za-z0-9-]+", line):
+                  raise SystemExit(f"::error::invalid discover-dependents entry: {line}")
+              entry(line)["discover"] = True
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"owners={json.dumps(list(owners.values()), separators=(',', ':'))}\n")
+
+      # Docs- and test-only merges don't publish, so they don't fan out to dependents.
+      - id: publish
+        env:
+          CHANGED: ${{ steps.packable.outputs.changed }}
+        run: |
+          if [ "$CHANGED" = true ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: nupkg
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Push
+        env:
+          OWNER: ${{ github.repository_owner }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget add source --name github --username "$GITHUB_ACTOR" --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text "https://nuget.pkg.github.com/${OWNER}/index.json"
+          dotnet nuget push "nupkg/*.nupkg" --source github --api-key "$GITHUB_TOKEN" --skip-duplicate
+
+  # Runs on every build (PRs log the discovered set); sends only after a publish.
+  dependents:
+    name: dependents (${{ matrix.target.owner }})
+    needs: [build, publish]
+    if: always() && needs.build.result == 'success' && needs.build.outputs.owners != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.owners) }}
+    steps:
+      - id: read-token
+        if: matrix.target.discover
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          owner: ${{ matrix.target.owner }}
+          permission-contents: read
+
+      - id: discover
+        if: matrix.target.discover
+        uses: $/.github/actions/discover-dependents
+        with:
+          owner: ${{ matrix.target.owner }}
+          updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
+          exclude: ${{ github.repository }}
+          token: ${{ steps.read-token.outputs.token }}
+
+      - name: Merge
+        id: merge
+        env:
+          EXPLICIT: ${{ toJSON(matrix.target.repos) }}
+          DISCOVERED: ${{ steps.discover.outputs.repos || '[]' }}
+        run: |
+          repos="$(jq -nc --argjson a "$EXPLICIT" --argjson b "$DISCOVERED" '$a + $b | unique')"
+          echo "dependents: $repos"
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -r 'map(split("/")[1]) | join(",")' <<< "$repos")" >> "$GITHUB_OUTPUT"
+
+      - id: write-token
+        if: needs.publish.result == 'success' && steps.merge.outputs.names != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          owner: ${{ matrix.target.owner }}
+          repositories: ${{ steps.merge.outputs.names }}
+          permission-contents: write
+
+      - name: Send update-dependencies
+        if: needs.publish.result == 'success' && steps.merge.outputs.names != ''
+        env:
+          GH_TOKEN: ${{ steps.write-token.outputs.token }}
+          REPOS: ${{ steps.merge.outputs.repos }}
+          SOURCE: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.package-version }}
+          PACKAGES: ${{ needs.build.outputs.packages }}
+        run: |
+          payload="$(jq -nc --arg source "$SOURCE" --arg version "$VERSION" --argjson packages "$PACKAGES" \
+            '{event_type: "update-dependencies", client_payload: {source: $source, version: $version, packages: $packages}}')"
+          jq -r '.[]' <<< "$REPOS" | while read -r repo; do
+            echo "dispatching to $repo"
+            gh api "repos/${repo}/dispatches" --input - <<< "$payload"
+          done
+
+  dependabot:
+    needs: build
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
