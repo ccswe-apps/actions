@@ -1,0 +1,69 @@
+name: move-major-tag
+
+# Reusable workflow: force-moves a major tag (e.g. v2) to a target ref with the
+# andy-the-messenger-robot App token. The caller repo's `v*` tag ruleset must list andy
+# as a bypass actor. Also a rollback tool: call it with an older tag as target.
+#
+# Caller shape (manual dispatch, .github/workflows/move-major-tag.yml):
+#
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         target: { description: The tag or ref to point at, required: true }
+#         major: { type: choice, options: [v2, v1] }
+#   permissions:
+#     contents: read
+#   jobs:
+#     move:
+#       uses: ccswe-apps/actions/.github/workflows/move-major-tag.yml@master
+#       with:
+#         target: ${{ inputs.target }}
+#         major: ${{ inputs.major }}
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: The tag or ref the major tag points at.
+        type: string
+        required: true
+      major:
+        description: The major tag to move (e.g. v2).
+        type: string
+        required: true
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Move major tag
+        env:
+          MAJOR: ${{ inputs.major }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          git tag -f "$MAJOR" "${TARGET}^{commit}"
+          git push origin "refs/tags/${MAJOR}" --force

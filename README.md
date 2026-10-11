@@ -19,6 +19,8 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
 | `npm-build-app.yml` | `build` (npm ci, format:check, lint, test, build with build env) · `dependabot` |
 | `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
+| `npm-release-action.yml` | on a version tag: `verify` (tag on the default branch, `npm-build` with the `dist/` check) → `publish` (GitHub Release) → `major` (move the major tag) |
+| `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
 | `dispatch-dependents.yml` | nested in the library workflows: find dependents, send `update-dependencies` |
 | `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
 
