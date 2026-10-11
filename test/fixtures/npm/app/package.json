@@ -1,0 +1,11 @@
+{
+  "name": "fixture-npm-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "format:check": "node -e \"console.log('format:check')\"",
+    "lint": "node -e \"console.log('lint')\"",
+    "test": "node -e \"require('node:fs').writeFileSync('test-ran', '')\"",
+    "build": "node -e \"require('node:fs').writeFileSync('site-url', process.env.SITE ?? '')\""
+  }
+}

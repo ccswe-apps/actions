@@ -1,0 +1,66 @@
+name: npm-build-action
+
+# Reusable workflow for JavaScript GitHub Actions whose bundled output (e.g. dist/) is committed.
+#
+#   build       npm-build: npm ci, format:check, lint, test (when present), build, then
+#               fail unless `committed-output` (default dist) is unchanged
+#   dependabot  merge / update-behind (dependabot.yml)
+#
+# Caller shape:
+#
+#   permissions:
+#     contents: read
+#     pull-requests: read
+#   jobs:
+#     pipeline:                 # keep the id: the required check is `pipeline / build`
+#       uses: ccswe-apps/actions/.github/workflows/npm-build-action.yml@master
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# Package contract: scripts `format:check`, `lint` and `build`; `test` is optional;
+# the Node version comes from `node-version-file` (default .nvmrc).
+
+on:
+  workflow_call:
+    inputs:
+      committed-output:
+        description: Committed build output path; the build fails unless it leaves it unchanged.
+        type: string
+        default: dist
+      node-version-file:
+        type: string
+        default: .nvmrc
+      timeout-minutes:
+        type: number
+        default: 15
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  # No `name:`, so the check is `<caller job> / build`.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: $/.github/actions/npm-build
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          committed-output: ${{ inputs.committed-output }}
+
+  dependabot:
+    needs: build
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: $/.github/workflows/dependabot.yml
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
