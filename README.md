@@ -30,7 +30,7 @@ Callers:
 - Keep the calling job id `pipeline`. The required check is `pipeline / build`.
 - Set `permissions:` and `concurrency:` in the caller workflow. A called workflow can only lower permissions, and it sees the caller's `github.workflow`.
 - Pass secrets by name. `secrets: inherit` doesn't cross orgs.
-- Reference `@master` for now.
+- Reference `@master`: there are no release tags, so stage a breaking change by pointing one caller at `@<branch>` first.
 
 ## Composite actions
 
