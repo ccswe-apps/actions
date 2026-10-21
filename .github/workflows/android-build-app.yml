@@ -49,7 +49,7 @@ on:
         required: true
       java-version:
         type: string
-        default: '17'
+        default: '21'
       tasks:
         description: Gradle tasks for build (test, lint).
         type: string
