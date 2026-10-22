@@ -8,8 +8,8 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 
 | Workflow | Jobs |
 |---|---|
-| `android-build-app.yml` | `build` → `release` (signed APK as the `release-apk` artifact, on a version bump) · `dependabot` |
-| `android-build-library.yml` | `build` → `publish` (GitHub Packages Maven, on a version bump) · `dependabot` |
+| `android-build-app.yml` | `build` (on a version bump, also the signed APK as the `release-apk` artifact, same job) · `dependabot` |
+| `android-build-library.yml` | `build` (on a version bump, also `publish` to GitHub Packages Maven, same job) · `dependabot` |
 | `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push) → `prune` · `dependabot` |
 | `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (nuget.org with `NUGET_API_KEY`, else GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot` |
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |

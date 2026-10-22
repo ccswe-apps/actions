@@ -2,12 +2,13 @@ name: android-build-app
 
 # Reusable workflow for Android app repos.
 #
-#   build       gradle-build with `tasks`; on a default-branch push, version-changed on `version-files`
-#   release     only when build reports a version change: signing (when a keystore is passed),
-#               assembleRelease, and the APK uploaded as the `release-apk` artifact
+#   build       gradle-build with `tasks`. On a default-branch push where `version-files`
+#               changed, the same job also releases: signing (when a keystore is passed),
+#               assembleRelease in the same Gradle invocation (no second compile), and the
+#               APK uploaded as the `release-apk` artifact
 #   dependabot  merge / update-behind (dependabot.yml)
 #
-# Outputs: release ('true' when the release job ran), version-name, version-code,
+# Outputs: release ('true' when the build released), version-name, version-code,
 # file-name (the APK inside the `release-apk` artifact). Distribution is the caller's
 # job, e.g. a second job gated on `needs.pipeline.outputs.release == 'true'`.
 #
@@ -23,6 +24,7 @@ name: android-build-app
 #         app-module: my-app
 #         version-files: buildSrc/src/main/java/Versions.kt
 #         signing-key-alias: ${{ vars.SIGNING_KEY_ALIAS }}
+#         coverage-path: my-app/build/reports/kover/    # optional; tasks must produce it
 #       secrets:
 #         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}               # optional: private Maven feed
 #         SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -61,13 +63,17 @@ on:
       signing-key-alias:
         type: string
         default: ''
+      coverage-path:
+        description: Coverage report path uploaded as `coverage-report`; empty skips it.
+        type: string
+        default: ''
       timeout-minutes:
         type: number
         default: 30
     secrets:
       PACKAGES_PAT:
         required: false
-      # Not available to Dependabot runs; only the release job reads them.
+      # Not available to Dependabot runs; only a releasing build reads them.
       SIGNING_KEYSTORE_BASE64:
         required: false
       SIGNING_STORE_PASSWORD:
@@ -82,11 +88,11 @@ on:
       release:
         value: ${{ jobs.build.outputs.release }}
       version-name:
-        value: ${{ jobs.release.outputs.version-name }}
+        value: ${{ jobs.build.outputs.version-name }}
       version-code:
-        value: ${{ jobs.release.outputs.version-code }}
+        value: ${{ jobs.build.outputs.version-code }}
       file-name:
-        value: ${{ jobs.release.outputs.file-name }}
+        value: ${{ jobs.build.outputs.file-name }}
 
 jobs:
   # No `name:`, so the check is `<caller job> / build`.
@@ -97,18 +103,13 @@ jobs:
       contents: read
     outputs:
       release: ${{ steps.version.outputs.changed }}
+      version-name: ${{ steps.meta.outputs.version-name }}
+      version-code: ${{ steps.meta.outputs.version-code }}
+      file-name: ${{ steps.meta.outputs.file-name }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - uses: $/.github/actions/gradle-build
-        env:
-          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
-        with:
-          java-version: ${{ inputs.java-version }}
-          tasks: ${{ inputs.tasks }}
-          gradle-properties: ${{ inputs.gradle-properties }}
 
       - id: version
         if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -116,21 +117,8 @@ jobs:
         with:
           files: ${{ inputs.version-files }}
 
-  release:
-    needs: build
-    if: needs.build.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    permissions:
-      contents: read
-    outputs:
-      version-name: ${{ steps.meta.outputs.version-name }}
-      version-code: ${{ steps.meta.outputs.version-code }}
-      file-name: ${{ steps.meta.outputs.file-name }}
-    steps:
-      - uses: actions/checkout@v7
-
       - name: Set up release signing
+        if: steps.version.outputs.changed == 'true'
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -154,11 +142,13 @@ jobs:
           PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
         with:
           java-version: ${{ inputs.java-version }}
-          tasks: assembleRelease
+          tasks: ${{ inputs.tasks }}${{ steps.version.outputs.changed == 'true' && ' assembleRelease' || '' }}
           gradle-properties: ${{ inputs.gradle-properties }}
+          coverage-path: ${{ inputs.coverage-path }}
 
       - id: meta
         name: Read release metadata
+        if: steps.version.outputs.changed == 'true'
         env:
           APK_DIR: ${{ inputs.app-module }}/build/outputs/apk/release
         run: |
@@ -179,7 +169,8 @@ jobs:
             echo "file-path=$APK_DIR/$file_name"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v7
+      - if: steps.version.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
         with:
           name: release-apk
           path: ${{ steps.meta.outputs.file-path }}
