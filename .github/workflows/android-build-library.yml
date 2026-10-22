@@ -2,8 +2,9 @@ name: android-build-library
 
 # Reusable workflow for Android library repos published to GitHub Packages (Maven).
 #
-#   build       gradle-build with `tasks`; on a default-branch push, version-changed on `version-files`
-#   publish     `./gradlew publish` with GITHUB_TOKEN, only when build reports a version change
+#   build       gradle-build with `tasks`. On a default-branch push where `version-files`
+#               changed, `publish` runs in the same Gradle invocation (no second compile) with
+#               GITHUB_TOKEN
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Caller shape:
@@ -62,21 +63,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # packages: write is for publish; the token stays out of .git/config (persist-credentials)
+    # and reaches Gradle only on a publishing run.
     permissions:
       contents: read
+      packages: write
     outputs:
       publish: ${{ steps.version.outputs.changed }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - uses: $/.github/actions/gradle-build
-        with:
-          java-version: ${{ inputs.java-version }}
-          tasks: ${{ inputs.tasks }}
-          gradle-properties: ${{ inputs.gradle-properties }}
-          coverage-path: ${{ inputs.coverage-path }}
+          persist-credentials: false
 
       - id: version
         if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -84,25 +82,15 @@ jobs:
         with:
           files: ${{ inputs.version-files }}
 
-  publish:
-    needs: build
-    if: needs.build.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-
       - uses: $/.github/actions/gradle-build
         env:
-          GITHUB_USER: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_USER: ${{ steps.version.outputs.changed == 'true' && github.actor || '' }}
+          GITHUB_TOKEN: ${{ steps.version.outputs.changed == 'true' && github.token || '' }}
         with:
           java-version: ${{ inputs.java-version }}
-          tasks: publish
+          tasks: ${{ inputs.tasks }}${{ steps.version.outputs.changed == 'true' && ' publish' || '' }}
           gradle-properties: ${{ inputs.gradle-properties }}
+          coverage-path: ${{ inputs.coverage-path }}
 
   dependabot:
     needs: build
