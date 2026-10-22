@@ -3,8 +3,9 @@ name: android-build-library
 # Reusable workflow for Android library repos published to GitHub Packages (Maven).
 #
 #   build       gradle-build with `tasks`. On a default-branch push where `version-files`
-#               changed, `publish` runs in the same Gradle invocation (no second compile) with
-#               GITHUB_TOKEN
+#               changed, the job runs only `publish` (with GITHUB_TOKEN) instead: `tasks` and
+#               the coverage upload are skipped, since the required check already ran them on
+#               the same tree (the ruleset requires up-to-date branches).
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Caller shape:
@@ -88,9 +89,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.version.outputs.changed == 'true' && github.token || '' }}
         with:
           java-version: ${{ inputs.java-version }}
-          tasks: ${{ inputs.tasks }}${{ steps.version.outputs.changed == 'true' && ' publish' || '' }}
+          tasks: ${{ steps.version.outputs.changed == 'true' && 'publish' || inputs.tasks }}
           gradle-properties: ${{ inputs.gradle-properties }}
-          coverage-path: ${{ inputs.coverage-path }}
+          coverage-path: ${{ steps.version.outputs.changed != 'true' && inputs.coverage-path || '' }}
 
   dependabot:
     needs: build

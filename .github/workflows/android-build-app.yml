@@ -3,9 +3,10 @@ name: android-build-app
 # Reusable workflow for Android app repos.
 #
 #   build       gradle-build with `tasks`. On a default-branch push where `version-files`
-#               changed, the same job also releases: signing (when a keystore is passed),
-#               assembleRelease in the same Gradle invocation (no second compile), and the
-#               APK uploaded as the `release-apk` artifact
+#               changed, the job releases instead: signing (when a keystore is passed),
+#               assembleRelease only, and the APK uploaded as the `release-apk` artifact.
+#               `tasks` and the coverage upload are skipped there: the required check already
+#               ran them on the same tree (the ruleset requires up-to-date branches).
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Outputs: release ('true' when the build released), version-name, version-code,
@@ -142,9 +143,9 @@ jobs:
           PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
         with:
           java-version: ${{ inputs.java-version }}
-          tasks: ${{ inputs.tasks }}${{ steps.version.outputs.changed == 'true' && ' assembleRelease' || '' }}
+          tasks: ${{ steps.version.outputs.changed == 'true' && 'assembleRelease' || inputs.tasks }}
           gradle-properties: ${{ inputs.gradle-properties }}
-          coverage-path: ${{ inputs.coverage-path }}
+          coverage-path: ${{ steps.version.outputs.changed != 'true' && inputs.coverage-path || '' }}
 
       - id: meta
         name: Read release metadata
