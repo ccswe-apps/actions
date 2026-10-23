@@ -121,7 +121,11 @@ jobs:
         if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: $/.github/actions/version-changed
         with:
-          files: src Directory.Build.props Directory.Packages.props version.json global.json
+          # Test projects under src/ (*.UnitTests, *.IntegrationTests) are excluded; a package
+          # version bump in Directory.Packages.props still publishes, even if only tests use it.
+          files: >-
+            src Directory.Build.props Directory.Packages.props version.json global.json
+            :(exclude,glob)src/**/*.UnitTests/** :(exclude,glob)src/**/*.IntegrationTests/**
 
       # Docs- and test-only merges don't publish, so they don't fan out to dependents.
       - id: publish
