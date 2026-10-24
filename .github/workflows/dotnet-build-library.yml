@@ -3,7 +3,8 @@ name: dotnet-build-library
 # Reusable workflow for .NET library repos published to GitHub Packages or nuget.org.
 #
 # Pipeline:
-#   build       .github/actions/dotnet-build on `path` (unit and integration tests),
+#   build       dependents-plan (the per-account `owners` for dependents), then
+#               .github/actions/dotnet-build on `path` (unit and integration tests),
 #               .github/actions/dotnet-pack, and dotnet-validate when validate-packages
 #   publish     push the packages (and .snupkg) to nuget.org when NUGET_API_KEY is
 #               passed, else nuget.pkg.github.com/<owner> (default-branch push that
@@ -90,6 +91,7 @@ jobs:
       packages: ${{ steps.pack.outputs.packages }}
       publish: ${{ steps.publish.outputs.publish }}
       only: ${{ steps.opt-in.outputs.only }}
+      owners: ${{ steps.plan.outputs.owners }}
     steps:
       - name: Check dispatch
         if: inputs.dispatch != 'all' && inputs.dispatch != 'opt-in'
@@ -98,6 +100,19 @@ jobs:
         run: |
           echo "::error::dispatch must be all or opt-in, got: $DISPATCH"
           exit 1
+
+      # No repo code needed: before checkout.
+      - id: opt-in
+        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
+        uses: $/.github/actions/dependents-opt-in
+
+      - id: plan
+        if: inputs.dependents != '' || inputs.discover-dependents != ''
+        uses: $/.github/actions/dependents-plan
+        with:
+          dependents: ${{ inputs.dependents }}
+          discover-dependents: ${{ inputs.discover-dependents }}
+          only: ${{ inputs.dispatch == 'all' && '*' || steps.opt-in.outputs.only }}
 
       - uses: actions/checkout@v7
         with:
@@ -154,10 +169,6 @@ jobs:
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - id: opt-in
-        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
-        uses: $/.github/actions/dependents-opt-in
 
   publish:
     needs: build
@@ -221,8 +232,7 @@ jobs:
       contents: read
     uses: $/.github/workflows/dispatch-dependents.yml
     with:
-      dependents: ${{ inputs.dependents }}
-      discover-dependents: ${{ inputs.discover-dependents }}
+      owners: ${{ needs.build.outputs.owners }}
       updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
       version: ${{ needs.build.outputs.package-version }}
       packages: ${{ needs.build.outputs.packages }}

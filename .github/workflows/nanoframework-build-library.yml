@@ -2,7 +2,8 @@ name: nanoframework-build-library
 
 # Reusable workflow for nanoFramework library repos published to nuget.org.
 #
-#   build             (Windows) locked restore, Release build, unit tests (vstest-nanoframework),
+#   build             (Windows) dependents-plan (the per-account `owners` for dependents),
+#                     locked restore, Release build, unit tests (vstest-nanoframework),
 #                     `nuget pack` of every tracked *.nuspec (with .snupkg); on a default-branch
 #                     push, version-changed decides whether to publish
 #   package-lock      PR only: every .nfproj in the solution has a packages.lock.json
@@ -66,7 +67,15 @@ jobs:
       version: ${{ steps.pack.outputs.version }}
       packages: ${{ steps.pack.outputs.packages }}
       publish: ${{ steps.packable.outputs.changed }}
+      owners: ${{ steps.plan.outputs.owners }}
     steps:
+      - id: plan
+        if: inputs.dependents != '' || inputs.discover-dependents != ''
+        uses: $/.github/actions/dependents-plan
+        with:
+          dependents: ${{ inputs.dependents }}
+          discover-dependents: ${{ inputs.discover-dependents }}
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -187,8 +196,7 @@ jobs:
       contents: read
     uses: $/.github/workflows/dispatch-dependents.yml
     with:
-      dependents: ${{ inputs.dependents }}
-      discover-dependents: ${{ inputs.discover-dependents }}
+      owners: ${{ needs.build.outputs.owners }}
       updater: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml
       version: ${{ needs.build.outputs.version }}
       packages: ${{ needs.build.outputs.packages }}

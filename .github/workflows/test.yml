@@ -301,6 +301,21 @@ jobs:
         run: |
           [ "$REPOS" = '["fixture/android-app"]' ] || { echo "::error::unexpected repos: $REPOS"; exit 1; }
 
+      # dependents-plan: owners grouped case-insensitively, invalid entries fail.
+      - name: Assert plan
+        run: |
+          plan() {
+            DEPENDENTS="$1" DISCOVER="$2" ONLY="$3" python3 .github/actions/dependents-plan/dependents-plan.py
+          }
+          out="$(plan $'Fixture/app\nother/lib' $'fixture\nscan' 'fixture/app other/lib')"
+          expected='owners=[{"owner":"Fixture","discover":true,"repos":["Fixture/app"]},{"owner":"other","discover":false,"repos":["other/lib"]},{"owner":"scan","discover":true,"repos":[]}]'
+          grep -qxF "$expected" <<< "$out" || { echo "::error::unexpected plan: $out"; exit 1; }
+          grep -qxF '::warning::Update-Dependents: other/lib is not in a scanned account' <<< "$out" ||
+            { echo "::error::no warning for other/lib"; exit 1; }
+          [ "$(plan '' '' '*')" = $'only: *\nowners=[]' ] || { echo "::error::empty plan"; exit 1; }
+          if plan 'bad' '' '*'; then echo "::error::invalid dependents entry accepted"; exit 1; fi
+          if plan '' 'bad/owner' '*'; then echo "::error::invalid discover-dependents entry accepted"; exit 1; fi
+
       # Update-Dependents parsing from a pull_request body.
       - name: Assert opt-in
         env:

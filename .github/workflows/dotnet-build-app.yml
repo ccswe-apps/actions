@@ -5,8 +5,8 @@ name: dotnet-build-app
 #   build       dotnet-build on `path` (nbgv, restore, build, *.UnitTests.csproj);
 #               skipped in template repos and on a derived repo's "Initial commit" push
 #   publish     only with publish-image on a default-branch push: docker build + push to
-#               ghcr.io/<owner>/<image-name> (version and latest tags)
-#   prune       keeps the last keep-image-versions image versions
+#               ghcr.io/<owner>/<image-name> (version and latest tags), then prunes to the
+#               last keep-image-versions image versions (never fails the job)
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Outputs: published ('true' when the image was pushed), version (nbgv SimpleVersion,
@@ -110,7 +110,6 @@ jobs:
     outputs:
       published: ${{ steps.done.outputs.published }}
       image: ${{ steps.image.outputs.image }}
-      name: ${{ steps.image.outputs.name }}
     steps:
       # fetch-depth: 0: the Dockerfile COPYs .git and the nbgv MSBuild package
       # stamps the shipped binary's version from full history.
@@ -150,18 +149,13 @@ jobs:
       - id: done
         run: echo "published=true" >> "$GITHUB_OUTPUT"
 
-  prune:
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Housekeeping; never fails the pipeline.
-    continue-on-error: true
-    permissions:
-      packages: write
-    steps:
-      - uses: actions/delete-package-versions@v5
+      # Housekeeping; never fails the pipeline.
+      - name: Prune image versions
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: actions/delete-package-versions@v5
         with:
-          package-name: ${{ needs.publish.outputs.name }}
+          package-name: ${{ steps.image.outputs.name }}
           package-type: container
           min-versions-to-keep: ${{ inputs.keep-image-versions }}
           delete-only-untagged-versions: false

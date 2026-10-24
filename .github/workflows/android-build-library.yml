@@ -2,7 +2,8 @@ name: android-build-library
 
 # Reusable workflow for Android library repos published to GitHub Packages (Maven).
 #
-#   build       gradle-build with `tasks`. On a default-branch push where `version-files`
+#   build       dependents-plan (the per-account `owners` for dependents), then
+#               gradle-build with `tasks`. On a default-branch push where `version-files`
 #               changed, the job runs only `publish` (with GITHUB_TOKEN) instead: `tasks` and
 #               the coverage upload are skipped, since the required check already ran them on
 #               the same tree (the ruleset requires up-to-date branches). A publish reads the
@@ -97,6 +98,7 @@ jobs:
       version: ${{ steps.published.outputs.version }}
       served: ${{ steps.wait.outputs.served }}
       only: ${{ steps.opt-in.outputs.only }}
+      owners: ${{ steps.plan.outputs.owners }}
     steps:
       - name: Check dispatch
         if: inputs.dispatch != 'all' && inputs.dispatch != 'opt-in'
@@ -105,6 +107,19 @@ jobs:
         run: |
           echo "::error::dispatch must be all or opt-in, got: $DISPATCH"
           exit 1
+
+      # No repo code needed: before checkout.
+      - id: opt-in
+        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
+        uses: $/.github/actions/dependents-opt-in
+
+      - id: plan
+        if: inputs.dependents != '' || inputs.discover-dependents != ''
+        uses: $/.github/actions/dependents-plan
+        with:
+          dependents: ${{ inputs.dependents }}
+          discover-dependents: ${{ inputs.discover-dependents }}
+          only: ${{ inputs.dispatch == 'all' && '*' || steps.opt-in.outputs.only }}
 
       - uses: actions/checkout@v7
         with:
@@ -160,10 +175,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - id: opt-in
-        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
-        uses: $/.github/actions/dependents-opt-in
-
   # Runs on every build (PRs log the discovered set); sends only once the repository serves the publish.
   dependents:
     needs: build
@@ -174,8 +185,7 @@ jobs:
       contents: read
     uses: $/.github/workflows/dispatch-dependents.yml
     with:
-      dependents: ${{ inputs.dependents }}
-      discover-dependents: ${{ inputs.discover-dependents }}
+      owners: ${{ needs.build.outputs.owners }}
       updater: ccswe-apps/actions/.github/workflows/android-update-dependencies.yml
       version: ${{ needs.build.outputs.version }}
       packages: ${{ needs.build.outputs.packages || '[]' }}

@@ -1,0 +1,38 @@
+name: dependents-plan
+description: Group a library's explicit dependents and scanned accounts by owner, for dispatch-dependents.yml.
+
+# Used by the library workflows' build job; the `owners` output is dispatch-dependents.yml's
+# `owners` input (its matrix). Needs no token or checkout. Fails on an invalid entry.
+
+inputs:
+  dependents:
+    description: Repos (owner/name, one per line).
+    required: false
+    default: ''
+  discover-dependents:
+    description: Accounts (one per line) to scan.
+    required: false
+    default: ''
+  only:
+    description: Opted-in listeners (warns on an owner/name outside the scanned accounts).
+    required: false
+    default: '*'
+
+outputs:
+  owners:
+    description: 'JSON array of {owner, discover, repos}, one per account.'
+    value: ${{ steps.plan.outputs.owners }}
+
+runs:
+  using: composite
+  steps:
+    # shell: python runs on Linux and Windows runners.
+    - id: plan
+      shell: python
+      env:
+        DEPENDENTS: ${{ inputs.dependents }}
+        DISCOVER: ${{ inputs.discover-dependents }}
+        ONLY: ${{ inputs.only }}
+      run: |
+        import os, runpy
+        runpy.run_path(os.path.join(os.environ["GITHUB_ACTION_PATH"], "dependents-plan.py"), run_name="__main__")
