@@ -4,27 +4,23 @@ name: dispatch-dependents
 # when `send` is true, sends each `repository_dispatch: update-dependencies` with
 # client_payload {source, version, packages}.
 #
-#   plan        one entry per account: the explicit `dependents` plus whether to scan it
-#   dependents  per account (matrix): with discovery, an andy read token for the whole
-#               installation feeds discover-dependents, which keeps repos whose workflow takes
-#               `update-dependencies` and calls `updater` and that `only` names; with send, a
-#               contents-write token for just those repos sends the dispatch
+#   dependents  per account in `owners` (matrix; the build job's dependents-plan output):
+#               with discovery, an andy read token for the whole installation feeds
+#               discover-dependents, which keeps repos whose workflow takes
+#               `update-dependencies` and calls `updater` and that `only` names; with send,
+#               a contents-write token for just those repos sends the dispatch
 #
 # Runs on every build, so PR logs show the set (only listeners are printed, kept or not opted
-# in). `only` filters discovered listeners, not the explicit `dependents`. andy is a public
+# in). `only` filters discovered listeners, not the explicit repos. andy is a public
 # App: only accounts the caller lists are scanned, never its installations.
 
 on:
   workflow_call:
     inputs:
-      dependents:
-        description: Repos (owner/name, one per line).
+      owners:
+        description: 'JSON array of {owner, discover, repos} (dependents-plan).'
         type: string
-        default: ''
-      discover-dependents:
-        description: Accounts (one per line) to scan; only accounts you trust.
-        type: string
-        default: ''
+        required: true
       updater:
         description: The update-dependencies workflow a listener must call (owner/repo/.github/workflows/file.yml).
         type: string
@@ -51,44 +47,9 @@ on:
         required: true
 
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    outputs:
-      owners: ${{ steps.owners.outputs.owners }}
-    steps:
-      - name: Plan dependents
-        id: owners
-        env:
-          DEPENDENTS: ${{ inputs.dependents }}
-          DISCOVER: ${{ inputs.discover-dependents }}
-          ONLY: ${{ inputs.only }}
-        shell: python
-        run: |
-          import json, os, re
-          owners = {}
-          def entry(owner):
-              return owners.setdefault(owner.lower(), {"owner": owner, "discover": False, "repos": []})
-          for line in filter(None, (l.strip() for l in os.environ["DEPENDENTS"].splitlines())):
-              if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", line):
-                  raise SystemExit(f"::error::invalid dependents entry: {line}")
-              entry(line.split("/")[0])["repos"].append(line)
-          for line in filter(None, (l.strip() for l in os.environ["DISCOVER"].splitlines())):
-              if not re.fullmatch(r"[A-Za-z0-9-]+", line):
-                  raise SystemExit(f"::error::invalid discover-dependents entry: {line}")
-              entry(line)["discover"] = True
-          print(f"only: {os.environ['ONLY'] or '(none)'}")
-          for name in re.split(r"[\s,]+", os.environ["ONLY"]):
-              if "/" in name and not owners.get(name.split("/")[0].lower(), {}).get("discover"):
-                  print(f"::warning::Update-Dependents: {name} is not in a scanned account")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"owners={json.dumps(list(owners.values()), separators=(',', ':'))}\n")
-
   dependents:
     name: dependents (${{ matrix.target.owner }})
-    needs: plan
-    if: needs.plan.outputs.owners != '[]'
+    if: inputs.owners != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -96,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.plan.outputs.owners) }}
+        target: ${{ fromJSON(inputs.owners) }}
     steps:
       - id: read-token
         if: matrix.target.discover

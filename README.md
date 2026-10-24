@@ -11,7 +11,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact; tests ran on the PR) · `dependabot` |
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
 | `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking) |
-| `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push) → `prune` · `dependabot` |
+| `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push; then prunes old image versions) · `dependabot` |
 | `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (nuget.org with `NUGET_API_KEY`, else GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot` |
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |
 | `dotnet-update-dependencies.yml` | `update` (consumer side of `dependents`: bump, PR, auto-merge unless major) |
@@ -71,6 +71,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `dotnet-pack`: packs every `IsPackable` project at the given version and checks each package exists.
 - `discover-dependents`: an account's repos whose `update-dependencies` listener calls a given updater workflow, optionally limited to an opt-in list.
 - `dependents-opt-in`: the `Update-Dependents:` names from the PR body.
+- `dependents-plan`: groups `dependents` and `discover-dependents` by account into the `owners` matrix `dispatch-dependents.yml` takes.
 - `update-package-versions`: sets package ids to one version in every tracked `Directory.Packages.props`.
 - `setup-nanoframework`, `build-nanoframework`: nanobuild, MSBuild and NuGet CLI (Windows); locked restore and Release build stamped with nbgv.
 - `nanoframework-package-lock`, `nanoframework-packages-updated`: the nanoFramework PR checks.
@@ -88,7 +89,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `shellcheck` on the composite scripts
 - `fixture-gradle` (`gradle-build` against `test/fixtures/gradle`)
 - `fixture-dotnet-{pass,fail,no-tests,library,update}` (the .NET composites against `test/fixtures/dotnet`)
-- `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`, and `dependents-opt-in` parsing)
+- `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`, `dependents-plan`, and `dependents-opt-in` parsing)
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
 - `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`)
 

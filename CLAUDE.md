@@ -12,7 +12,7 @@ Public reusable workflows (`.github/workflows/`) and composite actions (`.github
 - Workflow names: `<platform>-build-<app|library>.yml`. Publish and release are gated jobs inside them. Separate triggers get their own workflow (`dotnet-release-app.yml` on tags, `dotnet-update-dependencies.yml` on dispatch).
 - nanoFramework jobs that need nanobuild, MSBuild, the NuGet CLI or nanodu run on `windows-latest`; everything else on ubuntu. There's no nanoFramework fixture: validate changes with a throwaway CCSWE.nanoFramework or Emily.Clock caller PR at `@<branch>`.
 - npm callers follow the README's script contract (`format:check`, `lint`, `test`, `build`); change the contract and every caller together.
-- The library workflows share `dispatch-dependents.yml` (nested; its check names gain a segment, none required); the .NET and Android ones share `dependents-opt-in`.
+- The library workflows share `dispatch-dependents.yml` (nested; its check names gain a segment, none required); the .NET and Android ones share `dependents-opt-in`, and all three `dependents-plan` (in `build`, feeding its `owners` input).
 - Discovery matches listeners by the literal updater path, e.g. `ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml` (also `android-` and `nanoframework-update-dependencies.yml`); renaming one breaks every dependent until their listeners change.
 - Called jobs have no `name:`. The required check is `<caller job> / build`.
 - Same-repo references use `$/` (no `@ref`). actionlint 1.7.12 rejects `$/`; pass the `-ignore` patterns from `test.yml`.
