@@ -37,18 +37,33 @@ Callers:
 
 After a publish, the .NET, Android and nanoFramework library workflows send `repository_dispatch: update-dependencies` to the repos in `dependents` and the listeners found in the `discover-dependents` accounts. A listener is a workflow that takes `update-dependencies` and calls the platform's updater (`dotnet-`, `android-` or `nanoframework-update-dependencies.yml`), which opens the bump PR.
 
+### Opt-in dispatch
+
 `dotnet-build-library.yml` and `android-build-library.yml` take `dispatch`:
-- `all` (default): every discovered listener.
-- `opt-in`: only the listeners named by `Update-Dependents:` lines in the PR body (the merged PR, on a push). Other dependents pick the version up from Dependabot or a manual PR. Explicit `dependents` are always sent.
+- `all` (default): every discovered listener. nanoFramework always dispatches to all.
+- `opt-in`: only the discovered listeners the library PR names in `Update-Dependents:` lines. Explicit `dependents` are always sent.
 
 ```
 Update-Dependents: rollout-web, midworld-apps/shelver-web
-Update-Dependents: all
+Update-Dependents: videobrowser-web
 ```
 
-Names are `name` (any scanned account) or `owner/name`, separated by commas or spaces. Lines inside HTML comments don't count, so a PR template can carry a commented hint. A PR build logs each discovered listener as kept or not opted in, and warns on names that match no listener.
+- A line starts with `Update-Dependents:` (case-insensitive); a PR body can have several.
+- Entries are a bare `name` (matched in every `discover-dependents` account) or `owner/name`, separated by commas or spaces.
+- `all` anywhere in a line opts in every listener.
+- Lines inside HTML comments (`<!-- ... -->`) are ignored, so a PR template can carry a commented hint.
 
-Android dependents get `packages` as `group:name` and their `[libraries]` entries set to the version (by `version.ref` or inline). A major bump, or a minor bump of a 0.x version, isn't auto-merged.
+When it's read:
+- **Push to the default branch:** the current body of the merged PR for the pushed commit. These dependents get the dispatch after the publish.
+- **`pull_request`:** the PR body in the event (with the default `pull_request` types, editing the body alone doesn't start a run; push a commit). This is a preview: the dependents job logs each discovered listener as kept or `(not opted in)`, and never sends.
+
+With no line (or no merged PR, e.g. a direct push), nothing is dispatched and the push skips the dependents job. Dependents pick the version up from their Dependabot schedule (weekly with the `repo-standards` templates) or a manual PR.
+
+A name that matches no listener in its account logs `::warning::Update-Dependents: <owner/name> is not an update-dependencies listener`; an `owner/name` outside the scanned accounts logs `... is not in a scanned account`. Invalid entries are warnings too; none of these fail the build.
+
+### Android updater
+
+`android-build-library.yml` reads the published coordinates from each `build/publications/*/pom-default.xml` and, once GitHub Packages serves `maven-metadata.xml` with the new version, sends `packages` as `group:name`. A listener calls `android-update-dependencies.yml`, which sets the matching `[libraries]` entries in `gradle/libs.versions.toml` (their `version.ref` key, or an inline version) and opens a `bot/update-dependencies/<source>/...` PR. It auto-merges unless the bump is breaking: a major change, or a minor change of a 0.x version.
 
 ## Composite actions
 
