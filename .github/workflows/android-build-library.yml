@@ -5,7 +5,13 @@ name: android-build-library
 #   build       gradle-build with `tasks`. On a default-branch push where `version-files`
 #               changed, the job runs only `publish` (with GITHUB_TOKEN) instead: `tasks` and
 #               the coverage upload are skipped, since the required check already ran them on
-#               the same tree (the ruleset requires up-to-date branches).
+#               the same tree (the ruleset requires up-to-date branches). A publish reads the
+#               published coordinates from build/publications/*/pom-default.xml and, with
+#               dependents, waits until the repository serves them (maven-wait).
+#   dependents  dispatch-dependents.yml: listeners calling android-update-dependencies.yml get
+#               client_payload {source, version, packages: ["group:name", ...]}. With
+#               `dispatch: opt-in`, only those the PR body names (`Update-Dependents:` lines,
+#               dependents-opt-in); a push naming none skips discovery.
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Caller shape:
@@ -20,13 +26,16 @@ name: android-build-library
 #       with:
 #         tasks: assembleRelease test lintRelease
 #         version-files: buildSrc/src/main/kotlin/_Versions_.kt
+#         discover-dependents: |       # optional: accounts to scan (trusted only; the App is public)
+#           <owner>
+#         dispatch: opt-in              # optional: default `all`
 #       secrets:
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 #
-# Library-repo contract: gradlew at the root; the Maven publication targets
-# maven.pkg.github.com/<owner>/<repo> with credentials from the GITHUB_USER /
-# GITHUB_TOKEN env vars.
+# Library-repo contract: gradlew at the root; the Maven publications (maven-publish, one
+# version) target maven.pkg.github.com/<owner>/<repo> with credentials from the
+# GITHUB_USER / GITHUB_TOKEN env vars.
 
 on:
   workflow_call:
@@ -53,6 +62,18 @@ on:
       timeout-minutes:
         type: number
         default: 45
+      dependents:
+        description: Repos (owner/name, one per line) to send update-dependencies after publishing.
+        type: string
+        default: ''
+      discover-dependents:
+        description: Accounts (one per line) to scan for update-dependencies listeners; only accounts you trust.
+        type: string
+        default: ''
+      dispatch:
+        description: "`all` discovered listeners, or `opt-in`: those named by the PR body's `Update-Dependents:` lines."
+        type: string
+        default: all
     secrets:
       AUTOMATION_APP_ID:
         required: true
@@ -69,9 +90,22 @@ jobs:
     permissions:
       contents: read
       packages: write
+      pull-requests: read
     outputs:
       publish: ${{ steps.version.outputs.changed }}
+      packages: ${{ steps.published.outputs.packages }}
+      version: ${{ steps.published.outputs.version }}
+      served: ${{ steps.wait.outputs.served }}
+      only: ${{ steps.opt-in.outputs.only }}
     steps:
+      - name: Check dispatch
+        if: inputs.dispatch != 'all' && inputs.dispatch != 'opt-in'
+        env:
+          DISPATCH: ${{ inputs.dispatch }}
+        run: |
+          echo "::error::dispatch must be all or opt-in, got: $DISPATCH"
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -92,6 +126,64 @@ jobs:
           tasks: ${{ steps.version.outputs.changed == 'true' && 'publish' || inputs.tasks }}
           gradle-properties: ${{ inputs.gradle-properties }}
           coverage-path: ${{ steps.version.outputs.changed != 'true' && inputs.coverage-path || '' }}
+
+      # maven-publish writes each publication's POM to build/publications/<name>/pom-default.xml.
+      - name: Published coordinates
+        id: published
+        if: steps.version.outputs.changed == 'true'
+        shell: python
+        run: |
+          import json, os, pathlib
+          import xml.etree.ElementTree as ET
+          packages, versions = set(), set()
+          for pom in pathlib.Path(".").glob("**/build/publications/*/pom-default.xml"):
+              fields = {child.tag.rsplit("}", 1)[-1]: (child.text or "").strip() for child in ET.parse(pom).getroot()}
+              packages.add(f"{fields['groupId']}:{fields['artifactId']}")
+              versions.add(fields["version"])
+              print(f"{pom}: {fields['groupId']}:{fields['artifactId']}:{fields['version']}")
+          if len(versions) > 1:
+              raise SystemExit(f"::error::publications have different versions: {sorted(versions)}")
+          if not packages:
+              print("::warning::no build/publications/*/pom-default.xml found")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"packages={json.dumps(sorted(packages), separators=(',', ':'))}\n")
+              out.write(f"version={next(iter(versions), '')}\n")
+
+      # Dependents resolve the exact version, so wait until the repository serves it.
+      - id: wait
+        if: steps.published.outputs.version != '' && (inputs.dependents != '' || inputs.discover-dependents != '')
+        uses: $/.github/actions/maven-wait
+        with:
+          url: https://maven.pkg.github.com/${{ github.repository }}
+          packages: ${{ steps.published.outputs.packages }}
+          version: ${{ steps.published.outputs.version }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: opt-in
+        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
+        uses: $/.github/actions/dependents-opt-in
+
+  # Runs on every build (PRs log the discovered set); sends only once the repository serves the publish.
+  dependents:
+    needs: build
+    if: >-
+      (inputs.dependents != '' || inputs.discover-dependents != '') &&
+      (inputs.dispatch == 'all' || inputs.dependents != '' || needs.build.outputs.only != '' || github.event_name == 'pull_request')
+    permissions:
+      contents: read
+    uses: $/.github/workflows/dispatch-dependents.yml
+    with:
+      dependents: ${{ inputs.dependents }}
+      discover-dependents: ${{ inputs.discover-dependents }}
+      updater: ccswe-apps/actions/.github/workflows/android-update-dependencies.yml
+      version: ${{ needs.build.outputs.version }}
+      packages: ${{ needs.build.outputs.packages || '[]' }}
+      only: ${{ inputs.dispatch == 'all' && '*' || needs.build.outputs.only }}
+      send: ${{ needs.build.outputs.served == 'true' }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 
   dependabot:
     needs: build

@@ -1,0 +1,51 @@
+name: maven-wait
+description: Wait until a Maven repository serves every artifact at a version.
+
+# Used by android-build-library.yml before dispatching update-dependencies.
+#
+#   - id: wait
+#     uses: ccswe-apps/actions/.github/actions/maven-wait@master   # $/... inside this repo
+#     with:
+#       url: https://maven.pkg.github.com/<owner>/<repo>
+#       packages: '["com.example:core"]'                   # group:name
+#       version: 1.2.3
+#       username: ${{ github.actor }}                      # with password, for authenticated repositories
+#       password: ${{ github.token }}
+#
+# Reads each artifact's maven-metadata.xml. Polls every 30s for up to 30 minutes; on timeout
+# `served` is 'false' with a warning, not a failure.
+
+inputs:
+  url:
+    description: Maven repository base URL.
+    required: true
+  packages:
+    description: JSON array of group:name.
+    required: true
+  version:
+    description: Artifact version.
+    required: true
+  username:
+    description: Basic-auth user; empty for anonymous.
+    default: ''
+  password:
+    description: Basic-auth password or token.
+    default: ''
+
+outputs:
+  served:
+    description: "'true' when every artifact is served, else 'false'."
+    value: ${{ steps.wait.outputs.served }}
+
+runs:
+  using: composite
+  steps:
+    - id: wait
+      shell: bash
+      env:
+        REPOSITORY_URL: ${{ inputs.url }}
+        PACKAGES: ${{ inputs.packages }}
+        VERSION: ${{ inputs.version }}
+        MAVEN_USERNAME: ${{ inputs.username }}
+        MAVEN_PASSWORD: ${{ inputs.password }}
+      run: '"$GITHUB_ACTION_PATH/maven-wait.sh"'

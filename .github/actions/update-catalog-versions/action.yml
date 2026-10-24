@@ -1,0 +1,43 @@
+name: update-catalog-versions
+description: Set Maven libraries to one version in a Gradle version catalog.
+
+# Composite action used by android-update-dependencies.yml (from this repo:
+# `uses: $/.github/actions/update-catalog-versions`). Run it in a checkout; it edits the
+# working tree only.
+#
+# For each [libraries] entry whose group:name (group/name or module) is in `packages`,
+# sets its [versions] key (version.ref) or its inline version. Fails on an invalid version
+# or coordinate.
+
+inputs:
+  packages:
+    description: Space-separated group:name coordinates.
+    required: true
+  version:
+    description: SemVer version to set.
+    required: true
+  catalog:
+    description: Version catalog path.
+    default: gradle/libs.versions.toml
+
+outputs:
+  changed:
+    description: "'true' if any version changed."
+    value: ${{ steps.update.outputs.changed }}
+  breaking:
+    description: "'true' if any change is a major bump, or a minor bump of a 0.x version."
+    value: ${{ steps.update.outputs.breaking }}
+  summary:
+    description: One "Bumps <group:name> from <old> to <new>" line per change.
+    value: ${{ steps.update.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - id: update
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        VERSION: ${{ inputs.version }}
+        CATALOG: ${{ inputs.catalog }}
+      run: python3 "$GITHUB_ACTION_PATH/update-catalog-versions.py"

@@ -7,11 +7,12 @@ name: dispatch-dependents
 #   plan        one entry per account: the explicit `dependents` plus whether to scan it
 #   dependents  per account (matrix): with discovery, an andy read token for the whole
 #               installation feeds discover-dependents, which keeps repos whose workflow takes
-#               `update-dependencies` and calls `updater`; with send, a contents-write token
-#               for just those repos sends the dispatch
+#               `update-dependencies` and calls `updater` and that `only` names; with send, a
+#               contents-write token for just those repos sends the dispatch
 #
-# Runs on every build, so PR logs show the set (only kept repos are printed). andy is a
-# public App: only accounts the caller lists are scanned, never its installations.
+# Runs on every build, so PR logs show the set (only listeners are printed, kept or not opted
+# in). `only` filters discovered listeners, not the explicit `dependents`. andy is a public
+# App: only accounts the caller lists are scanned, never its installations.
 
 on:
   workflow_call:
@@ -35,6 +36,10 @@ on:
         description: JSON array of package ids.
         type: string
         required: true
+      only:
+        description: Discovered listeners to keep (owner/name or name, comma- or whitespace-separated); `*` keeps all, empty none.
+        type: string
+        default: '*'
       send:
         description: Send the dispatches (true only after a publish the feed serves).
         type: boolean
@@ -58,6 +63,7 @@ jobs:
         env:
           DEPENDENTS: ${{ inputs.dependents }}
           DISCOVER: ${{ inputs.discover-dependents }}
+          ONLY: ${{ inputs.only }}
         shell: python
         run: |
           import json, os, re
@@ -72,6 +78,10 @@ jobs:
               if not re.fullmatch(r"[A-Za-z0-9-]+", line):
                   raise SystemExit(f"::error::invalid discover-dependents entry: {line}")
               entry(line)["discover"] = True
+          print(f"only: {os.environ['ONLY'] or '(none)'}")
+          for name in re.split(r"[\s,]+", os.environ["ONLY"]):
+              if "/" in name and not owners.get(name.split("/")[0].lower(), {}).get("discover"):
+                  print(f"::warning::Update-Dependents: {name} is not in a scanned account")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"owners={json.dumps(list(owners.values()), separators=(',', ':'))}\n")
 
@@ -104,6 +114,7 @@ jobs:
           owner: ${{ matrix.target.owner }}
           updater: ${{ inputs.updater }}
           exclude: ${{ github.repository }}
+          only: ${{ inputs.only }}
           token: ${{ steps.read-token.outputs.token }}
 
       - name: Merge

@@ -248,15 +248,16 @@ jobs:
   fixture-discover:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      OWNER: fixture
+      EXCLUDE: fixture/excluded
     steps:
       - uses: actions/checkout@v7
 
       - name: Discover (local)
         id: discover
         env:
-          OWNER: fixture
           UPDATER: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
-          EXCLUDE: fixture/excluded
         run: python3 .github/actions/discover-dependents/discover-dependents.py --local test/fixtures/listeners
 
       - name: Assert
@@ -264,6 +265,180 @@ jobs:
           REPOS: ${{ steps.discover.outputs.repos }}
         run: |
           [ "$REPOS" = '["fixture/dotnet-app", "fixture/renamed"]' ] || { echo "::error::unexpected repos: $REPOS"; exit 1; }
+
+      # ONLY: bare and qualified names, other owners ignored, unknown names warn, empty keeps none.
+      - name: Assert filtered
+        env:
+          UPDATER: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
+        run: |
+          discover() {
+            ONLY="$1" python3 .github/actions/discover-dependents/discover-dependents.py --local test/fixtures/listeners | tee /dev/stderr
+          }
+          check() {
+            local out="$1" expected="$2"
+            grep -qxF "repos=$expected" <<< "$out" || { echo "::error::expected repos=$expected"; exit 1; }
+          }
+          out="$(discover 'RENAMED, other/dotnet-app')"
+          check "$out" '["fixture/renamed"]'
+          grep -qxF -- '- fixture/dotnet-app: listener dotnet-app/.github/workflows/update-dependencies.yml (not opted in)' <<< "$out" ||
+            { echo "::error::dotnet-app not logged as skipped"; exit 1; }
+          out="$(discover 'fixture/dotnet-app typo')"
+          check "$out" '["fixture/dotnet-app"]'
+          grep -qF '::warning::Update-Dependents: fixture/typo is not an update-dependencies listener' <<< "$out" ||
+            { echo "::error::no warning for typo"; exit 1; }
+          check "$(discover '')" '[]'
+          check "$(discover '*')" '["fixture/dotnet-app", "fixture/renamed"]'
+
+      - name: Discover Android (local)
+        id: android
+        env:
+          UPDATER: ccswe-apps/actions/.github/workflows/android-update-dependencies.yml
+        run: python3 .github/actions/discover-dependents/discover-dependents.py --local test/fixtures/listeners
+
+      - name: Assert Android
+        env:
+          REPOS: ${{ steps.android.outputs.repos }}
+        run: |
+          [ "$REPOS" = '["fixture/android-app"]' ] || { echo "::error::unexpected repos: $REPOS"; exit 1; }
+
+      # Update-Dependents parsing from a pull_request body.
+      - name: Assert opt-in
+        env:
+          EVENT_NAME: pull_request
+        run: |
+          check() {
+            local body="$1" expected="$2" actual
+            actual="$(PR_BODY="$body" python3 .github/actions/dependents-opt-in/dependents-opt-in.py | tail -n 1)"
+            [ "$actual" = "only=$expected" ] || { echo "::error::body ${body@Q}: got $actual, expected only=$expected"; exit 1; }
+          }
+          check $'Fixes x.\r\n\r\nUpdate-Dependents: rollout-web, midworld-apps/shelver-web\r\n' 'rollout-web midworld-apps/shelver-web'
+          check $'<!-- Update-Dependents: rollout-web | all -->\nbody' ''
+          check $'<!--\nUpdate-Dependents: all\n-->\nupdate-dependents: rollout-web\nUpdate-Dependents:  shelver-web  rollout-web' 'rollout-web shelver-web'
+          check $'Update-Dependents: rollout-web, ALL' '*'
+          check '' ''
+          check $'Update-Dependents: bad|name, ok' 'ok'
+          check 'see Update-Dependents: rollout-web' ''
+          check $'Update-Dependents: typo-app' 'typo-app'
+
+  fixture-android-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CATALOG: test/fixtures/catalog/libs.versions.toml
+    steps:
+      - uses: actions/checkout@v7
+
+      # 0.x minor: breaking.
+      - id: minor
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.ccswe.android:core com.ccswe.android:app
+          version: 0.8.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert minor
+        env:
+          CHANGED: ${{ steps.minor.outputs.changed }}
+          BREAKING: ${{ steps.minor.outputs.breaking }}
+          SUMMARY: ${{ steps.minor.outputs.summary }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$BREAKING" != true ]; then
+            echo "::error::changed=$CHANGED breaking=$BREAKING (0.7 -> 0.8 is breaking)"
+            exit 1
+          fi
+          [ "$SUMMARY" = $'Bumps com.ccswe.android:app from 0.7.0 to 0.8.0\nBumps com.ccswe.android:core from 0.7.0 to 0.8.0' ] ||
+            { echo "::error::summary: $SUMMARY"; exit 1; }
+          [ "$(git diff -U0 -- "$CATALOG" | grep -c '^[-+][^-+]')" = 2 ] || { echo "::error::more than the ccswe key changed"; git diff; exit 1; }
+          grep -qx 'ccswe = "0.8.0"' "$CATALOG"
+          git checkout -- .
+
+      - id: patch
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.ccswe.android:core
+          version: 0.7.1
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert patch
+        env:
+          CHANGED: ${{ steps.patch.outputs.changed }}
+          BREAKING: ${{ steps.patch.outputs.breaking }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$BREAKING" != false ]; then
+            echo "::error::changed=$CHANGED breaking=$BREAKING"
+            exit 1
+          fi
+          grep -qx 'ccswe = "0.7.1"' "$CATALOG"
+          git checkout -- .
+
+      # version = { ref = ... }, a 1.x minor (not breaking), and a trailing comment.
+      - id: stable
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.example:stable
+          version: 1.5.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert stable
+        env:
+          CHANGED: ${{ steps.stable.outputs.changed }}
+          BREAKING: ${{ steps.stable.outputs.breaking }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$BREAKING" != false ]; then
+            echo "::error::changed=$CHANGED breaking=$BREAKING"
+            exit 1
+          fi
+          grep -qx 'stable = "1.5.0" # comment' "$CATALOG"
+          git checkout -- .
+
+      # Inline versions: table and "group:name:version" notation; a major change.
+      - id: inline
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.example:inline com.example:string
+          version: 3.0.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert inline
+        env:
+          CHANGED: ${{ steps.inline.outputs.changed }}
+          BREAKING: ${{ steps.inline.outputs.breaking }}
+        run: |
+          if [ "$CHANGED" != true ] || [ "$BREAKING" != true ]; then
+            echo "::error::changed=$CHANGED breaking=$BREAKING"
+            exit 1
+          fi
+          grep -qF 'name = "inline", version = "3.0.0" }' "$CATALOG"
+          grep -qx 'string-lib = "com.example:string:3.0.0"' "$CATALOG"
+          git checkout -- .
+
+      - id: unchanged
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.ccswe.android:core com.unknown:library
+          version: 0.7.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert unchanged
+        env:
+          CHANGED: ${{ steps.unchanged.outputs.changed }}
+        run: |
+          [ "$CHANGED" = false ] || { echo "::error::changed=$CHANGED"; exit 1; }
+          git diff --exit-code
+
+      - id: invalid
+        continue-on-error: true
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: core
+          version: 1.0.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert invalid
+        env:
+          OUTCOME: ${{ steps.invalid.outcome }}
+        run: |
+          [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
 
   fixture-npm-app:
     runs-on: ubuntu-latest
@@ -317,7 +492,7 @@ jobs:
           [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
 
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-android-update, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
     permissions:
       contents: read
       pull-requests: read
