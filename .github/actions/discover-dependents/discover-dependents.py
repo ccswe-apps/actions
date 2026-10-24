@@ -6,12 +6,15 @@ A repo is kept when one of its workflows has a `types:` list (or scalar) naming
 `update-dependencies` under `repository_dispatch` and a `uses: <updater>@<ref>`.
 Archived repos, template repos and EXCLUDE are skipped.
 
-Live:  env OWNER, UPDATER, EXCLUDE (owner/name), GH_TOKEN (an installation
+ONLY (default `*`, all) keeps just the listeners it names (owner/name or name, separated
+by commas or whitespace; empty keeps none); a name matching no listener is a warning.
+
+Live:  env OWNER, UPDATER, EXCLUDE (owner/name), ONLY, GH_TOKEN (an installation
        token for OWNER; `gh api installation/repositories` lists its repos).
 Local: --local DIR, where each DIR/<name>/.github/workflows/*.yml is a repo
        named OWNER/<name> (for tests).
-Prints only the kept repos (callers may be public; scanned names may be private) and a
-skipped count, then writes `repos` (JSON array of owner/name) to $GITHUB_OUTPUT.
+Prints only the listeners, kept or not opted in (callers may be public; scanned names
+may be private), and a skipped count, then writes `repos` (JSON array of owner/name) to $GITHUB_OUTPUT.
 """
 import json
 import os
@@ -91,25 +94,41 @@ def local_workflows(root, full_name):
         yield str(p.relative_to(root)), p.read_text()
 
 
+def opted_in(owner, only):
+    """Lowercase owner/name entries for OWNER, or None for all."""
+    entries = [e.lower() for e in re.split(r"[\s,]+", only) if e]
+    if "*" in entries:
+        return None
+    return {e if "/" in e else f"{owner.lower()}/{e}" for e in entries
+            if "/" not in e or e.split("/", 1)[0] == owner.lower()}
+
+
 def main():
     owner, updater = os.environ["OWNER"], os.environ["UPDATER"]
     exclude = os.environ.get("EXCLUDE", "").lower()
+    only = opted_in(owner, os.environ.get("ONLY", "*"))
     local = pathlib.Path(sys.argv[2]) if sys.argv[1:2] == ["--local"] else None
     repos = local_repos(local, owner) if local else live_repos(owner)
     workflows = (lambda r: local_workflows(local, r)) if local else live_workflows
 
-    kept, skipped = [], 0
+    kept, listeners, skipped = [], set(), 0
     for full_name, archived, is_template in repos:
         candidate = (full_name.split("/", 1)[0].lower() == owner.lower() and not archived
                      and not is_template and full_name.lower() != exclude)
         listener = candidate and next((path for path, text in workflows(full_name) if listens(text, updater)), None)
-        if listener:
+        if not listener:
+            skipped += 1
+            continue
+        listeners.add(full_name.lower())
+        if only is None or full_name.lower() in only:
             kept.append(full_name)
             print(f"+ {full_name}: listener {listener}")
         else:
-            skipped += 1
+            print(f"- {full_name}: listener {listener} (not opted in)")
 
     print(f"skipped: {skipped}")
+    for name in sorted((only or set()) - listeners):
+        print(f"::warning::Update-Dependents: {name} is not an update-dependencies listener")
 
     result = json.dumps(sorted(kept))
     print(f"repos={result}")

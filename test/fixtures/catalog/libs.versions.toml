@@ -1,0 +1,12 @@
+[versions]
+ccswe = "0.7.0"
+other = "1.2.3"
+stable = "1.4.0" # comment
+
+[libraries]
+ccswe-core = { group = "com.ccswe.android", name = "core", version.ref = "ccswe" }
+ccswe-app = { module = "com.ccswe.android:app", version.ref = "ccswe" }
+other-lib = { group = "com.example", name = "other", version.ref = "other" }
+stable-lib = { module = "com.example:stable", version = { ref = "stable" } }
+inline-lib = { group = "com.example", name = "inline", version = "2.0.0" }
+string-lib = "com.example:string:2.0.0"

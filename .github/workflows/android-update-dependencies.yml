@@ -1,0 +1,126 @@
+name: android-update-dependencies
+
+# Reusable workflow for Android repos that consume a library built with
+# android-build-library.yml: on the library's `update-dependencies` dispatch, set the
+# dispatched libraries to the published version in gradle/libs.versions.toml, open a PR as
+# andy-the-messenger-robot (so CI runs), close the PRs it supersedes, and auto-merge it
+# unless the bump is breaking (a major change, or a minor change of a 0.x version).
+#
+# Caller shape (.github/workflows/update-dependencies.yml):
+#
+#   on:
+#     repository_dispatch:
+#       types: [update-dependencies]
+#   permissions:
+#     contents: read
+#   jobs:
+#     update:
+#       uses: ccswe-apps/actions/.github/workflows/android-update-dependencies.yml@master
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# client_payload (sent by android-build-library.yml):
+#   {"source": "<owner>/<repo>", "version": "<semver>", "packages": ["<group>:<name>", ...]}
+# Consumer contract: libraries in gradle/libs.versions.toml, by version.ref or inline version.
+
+on:
+  workflow_call:
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: update-dependencies-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Read payload
+        id: payload
+        env:
+          SOURCE: ${{ github.event.client_payload.source }}
+          VERSION: ${{ github.event.client_payload.version }}
+          PACKAGES: ${{ toJSON(github.event.client_payload.packages) }}
+        run: |
+          if ! [[ "$SOURCE" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::invalid client_payload.source: $SOURCE"
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::invalid client_payload.version: $VERSION"
+            exit 1
+          fi
+          if ! packages="$(jq -er 'select(type == "array" and length > 0 and all(.[]; type == "string" and test("^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$"))) | join(" ")' <<< "$PACKAGES")"; then
+            echo "::error::invalid client_payload.packages: $PACKAGES"
+            exit 1
+          fi
+          {
+            echo "source-name=${SOURCE#*/}"
+            echo "version=$VERSION"
+            echo "packages=$packages"
+          } >> "$GITHUB_OUTPUT"
+
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - id: update
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: ${{ steps.payload.outputs.packages }}
+          version: ${{ steps.payload.outputs.version }}
+
+      - name: Open pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+          SOURCE_NAME: ${{ steps.payload.outputs.source-name }}
+          VERSION: ${{ steps.payload.outputs.version }}
+          SUMMARY: ${{ steps.update.outputs.summary }}
+          BREAKING: ${{ steps.update.outputs.breaking }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          prefix="bot/update-dependencies/${SOURCE_NAME}/"
+          branch="${prefix}${RUN_ID}-${RUN_ATTEMPT}"
+          title="Update ${SOURCE_NAME} packages to ${VERSION}"
+          user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "$title" -m "$SUMMARY"
+          git push origin "$branch"
+          url="$(gh pr create -R "$REPO" --base "$BASE" --head "$branch" --title "$title" --body "$SUMMARY")"
+          number="${url##*/}"
+
+          gh pr list -R "$REPO" --state open --limit 100 --json number,headRefName \
+            -q ".[] | select(.headRefName | startswith(\"${prefix}\")) | select(.number != ${number}) | .number" |
+            while read -r n; do
+              gh pr close "$n" -R "$REPO" --delete-branch --comment "Superseded by #${number}."
+            done
+
+          if [ "$BREAKING" = true ]; then
+            echo "::notice::#${number} is a breaking version change; not auto-merging"
+          else
+            gh pr merge "$number" -R "$REPO" --auto --squash
+          fi

@@ -1,7 +1,7 @@
 name: discover-dependents
 description: List an account's repos whose update-dependencies listener calls a given updater workflow.
 
-# Composite action used by dotnet-build-library.yml (from this repo:
+# Composite action used by dispatch-dependents.yml (from this repo:
 # `uses: $/.github/actions/discover-dependents`). GH_TOKEN must be an
 # installation token for `owner` (create-github-app-token with `owner` and no
 # `repositories`); the scan reads that installation's repos and their
@@ -18,6 +18,10 @@ inputs:
     description: Repo (owner/name) to skip, normally the library itself.
     required: false
     default: ''
+  only:
+    description: Listeners to keep (owner/name or name, comma- or whitespace-separated); `*` keeps all, empty none.
+    required: false
+    default: '*'
   token:
     description: Installation token for `owner`.
     required: true
@@ -36,5 +40,6 @@ runs:
         OWNER: ${{ inputs.owner }}
         UPDATER: ${{ inputs.updater }}
         EXCLUDE: ${{ inputs.exclude }}
+        ONLY: ${{ inputs.only }}
         GH_TOKEN: ${{ inputs.token }}
       run: python3 "$GITHUB_ACTION_PATH/discover-dependents.py"

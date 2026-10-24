@@ -1,0 +1,31 @@
+name: dependents-opt-in
+description: Resolve the dependents a library change opts in to from its PR's `Update-Dependents:` lines.
+
+# Used by the library workflows with `dispatch: opt-in`; the `only` output feeds
+# dispatch-dependents.yml. Reads the event's PR body on pull_request (a preview; PR runs
+# never send), else the body of the merged PR for github.sha (needs `pull-requests: read`).
+# No PR or no line: empty `only`. Syntax and behavior: README.md, Dependents.
+#
+#   Update-Dependents: rollout-web, midworld-apps/shelver-web
+#   Update-Dependents: all
+#
+# Lines inside HTML comments don't count. Never fails: lookup errors and invalid entries
+# are warnings.
+
+outputs:
+  only:
+    description: Space-separated names (owner/name or name), `*` for all, or empty.
+    value: ${{ steps.resolve.outputs.only }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        REPO: ${{ github.repository }}
+        SHA: ${{ github.sha }}
+        GH_TOKEN: ${{ github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/dependents-opt-in.py"

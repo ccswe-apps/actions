@@ -10,7 +10,9 @@ name: dotnet-build-library
 #               changed something packable), then wait until the feed serves them
 #   dependents  find dependents (`dependents` plus the listeners discovered in the
 #               `discover-dependents` accounts); once the feed serves the
-#               packages, send each `update-dependencies`
+#               packages, send each `update-dependencies`. With `dispatch: opt-in`,
+#               only the listeners the PR body names (`Update-Dependents:` lines,
+#               dependents-opt-in); a push naming none skips discovery
 #   dependabot  dependabot.yml: merge non-major Dependabot PRs, update behind bot PRs
 #
 # Caller shape:
@@ -26,6 +28,7 @@ name: dotnet-build-library
 #       with:
 #         discover-dependents: |       # accounts to scan (trusted only; the App is public)
 #           <owner>
+#         dispatch: opt-in              # optional: default `all`
 #       secrets:
 #         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}   # optional: publish to nuget.org
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
@@ -50,6 +53,10 @@ on:
         description: Accounts (one per line) to scan for update-dependencies listeners; only accounts you trust.
         type: string
         default: ''
+      dispatch:
+        description: "`all` discovered listeners, or `opt-in`: those named by the PR body's `Update-Dependents:` lines."
+        type: string
+        default: all
       path:
         description: Directory holding the solution.
         type: string
@@ -77,11 +84,21 @@ jobs:
     permissions:
       contents: read
       checks: write
+      pull-requests: read
     outputs:
       package-version: ${{ steps.build.outputs.package-version }}
       packages: ${{ steps.pack.outputs.packages }}
       publish: ${{ steps.publish.outputs.publish }}
+      only: ${{ steps.opt-in.outputs.only }}
     steps:
+      - name: Check dispatch
+        if: inputs.dispatch != 'all' && inputs.dispatch != 'opt-in'
+        env:
+          DISPATCH: ${{ inputs.dispatch }}
+        run: |
+          echo "::error::dispatch must be all or opt-in, got: $DISPATCH"
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -138,6 +155,10 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - id: opt-in
+        if: inputs.dispatch == 'opt-in' && (inputs.dependents != '' || inputs.discover-dependents != '')
+        uses: $/.github/actions/dependents-opt-in
+
   publish:
     needs: build
     if: needs.build.outputs.publish == 'true'
@@ -193,7 +214,9 @@ jobs:
   # Runs on every build (PRs log the discovered set); sends only once the feed serves the publish.
   dependents:
     needs: [build, publish]
-    if: always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '')
+    if: >-
+      always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '') &&
+      (inputs.dispatch == 'all' || inputs.dependents != '' || needs.build.outputs.only != '' || github.event_name == 'pull_request')
     permissions:
       contents: read
     uses: $/.github/workflows/dispatch-dependents.yml
@@ -203,6 +226,7 @@ jobs:
       updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
       version: ${{ needs.build.outputs.package-version }}
       packages: ${{ needs.build.outputs.packages }}
+      only: ${{ inputs.dispatch == 'all' && '*' || needs.build.outputs.only }}
       send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
     secrets:
       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
