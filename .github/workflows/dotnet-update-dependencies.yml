@@ -100,7 +100,7 @@ jobs:
           version: ${{ steps.payload.outputs.version }}
 
       - if: steps.update.outputs.changed == 'true'
-        uses: actions/setup-dotnet@v6
+        uses: $/.github/actions/setup-dotnet
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 

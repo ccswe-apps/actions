@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ''
   dotnet-version:
-    description: SDK version for actions/setup-dotnet.
+    description: SDK version for setup-dotnet (`<major>.<minor>.x` resolves to the latest SDK).
     required: false
     default: '10.0.x'
   artifact-name:
@@ -59,7 +59,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-dotnet@v6
+    - uses: $/.github/actions/setup-dotnet
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
 

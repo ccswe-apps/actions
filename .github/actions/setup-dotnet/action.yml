@@ -1,0 +1,25 @@
+name: setup-dotnet
+description: actions/setup-dotnet with a `<major>.<minor>.x` version resolved to that channel's latest SDK.
+
+inputs:
+  dotnet-version:
+    description: SDK version for actions/setup-dotnet.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Channel installs download through aka.ms; exact versions download from builds.dotnet.microsoft.com.
+    - id: resolve
+      shell: bash
+      env:
+        VERSION: ${{ inputs.dotnet-version }}
+      run: |
+        if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.x$ ]]; then
+          VERSION=$(curl -fsSL --retry 3 "https://builds.dotnet.microsoft.com/dotnet/release-metadata/${BASH_REMATCH[1]}/releases.json" | jq -r '."latest-sdk"')
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: ${{ steps.resolve.outputs.version }}
