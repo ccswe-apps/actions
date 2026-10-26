@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Polls SOURCE's flat container or registration index until it lists VERSION for every id in
-# PACKAGES (30s interval, 30-minute deadline). Writes indexed=true|false to GITHUB_OUTPUT.
+# PACKAGES (30s interval, 10-minute deadline). Writes indexed=true|false to GITHUB_OUTPUT.
 set -euo pipefail
 
 curl_args=(-sfL --compressed)
@@ -30,11 +30,11 @@ served() {
   fi
 }
 
-deadline=$((SECONDS + 30 * 60))
+deadline=$((SECONDS + 10 * 60))
 for id in $(jq -r '.[]' <<< "$PACKAGES"); do
   until served "$id"; do
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "::warning::$id $VERSION not served by $SOURCE after 30 minutes"
+      echo "::warning::$id $VERSION not served by $SOURCE after 10 minutes"
       echo "indexed=false" >> "$GITHUB_OUTPUT"
       exit 0
     fi

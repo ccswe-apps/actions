@@ -1,8 +1,8 @@
-# Set nuget-wait's timeout from measured publish latency
+# Check how often nuget-wait times out
 
-`nuget-wait` polls every 30s for up to 30 minutes (`.github/actions/nuget-wait/nuget-wait.sh`). The whole time is billed as runner minutes. On a timeout `indexed` is false and the library's `dependents` job sends nothing. That's acceptable: dependents can't restore an unserved version anyway, so the bump can be dispatched by hand or picked up by Dependabot.
+`nuget-wait` polls every 30s for up to 10 minutes (`.github/actions/nuget-wait/nuget-wait.sh`). It was cut from 30 minutes on 2026-10-26 because the whole wait is billed as runner minutes. On a timeout `indexed` is false and the library's `dependents` job sends nothing. That's acceptable: dependents can't restore an unserved version anyway, so the bump can be dispatched by hand or picked up by Dependabot.
 
-## Measured (2026-10-26)
+## Measured with the 30-minute deadline (2026-10-26)
 
 These are master publish jobs still in the Actions logs. The timing runs from the first "Your package was pushed" to the last package served, or to the timeout.
 
@@ -16,8 +16,5 @@ To re-measure, scan the `publish` / `pipeline / publish` job logs of the master 
 
 ## Steps
 
-1. Re-measure with more nuget.org publishes, since the sample above is small.
-2. Pick a timeout that covers the usual case. A shorter timeout costs a missed dispatch, not a failed build.
-3. Change the deadline (and its comments in `nuget-wait.sh`, `action.yml` and the README) and validate as in `CLAUDE.md`.
-
-Delete this file when done.
+1. After a few weeks of nuget.org publishes, count the `publish` jobs that logged `not served by ... after 10 minutes` against those that were served (scan as above).
+2. If timeouts are common, the missed dispatches are the cost; decide whether that's acceptable or the deadline should change. Otherwise delete this file.
