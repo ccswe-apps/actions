@@ -16,13 +16,13 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |
 | `dotnet-update-dependencies.yml` | `update` (consumer side of `dependents`: bump, PR, auto-merge unless major) |
 | `nanoframework-build-app.yml` | `build` (Windows) · `package-lock` · `packages-updated` (PRs) · `dependabot` |
-| `nanoframework-build-library.yml` | `build` (Windows, nuspec pack) → `publish` (nuget.org, when packable files changed; waits for the registration index) → `dependents` · `package-lock` · `packages-updated` (PRs) · `dependabot` |
+| `nanoframework-build-library.yml` | `build` (Windows, nuspec pack; outputs `publish` when packable files changed) · `package-lock` · `packages-updated` (PRs) · `dependabot`. The caller adds `publish` (`nuget-org-publish`) and `dependents` (`dispatch-dependents.yml`) jobs; see the header |
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
 | `npm-build-app.yml` | `build` (npm ci, format:check, lint, test, build with build env) · `dependabot` |
 | `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
 | `npm-release-action.yml` | on a version tag: `verify` (tag on the default branch, `npm-build` with the `dist/` check) → `publish` (GitHub Release) → `major` (move the major tag) |
 | `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
-| `dispatch-dependents.yml` | nested in the library workflows: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
+| `dispatch-dependents.yml` | nested in the .NET and Android library workflows, a caller job for nanoFramework libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
 | `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
 
 The caller shape, inputs and contract are in each workflow's header.
@@ -35,7 +35,7 @@ Callers:
 
 ## Dependents
 
-After a publish, the .NET, Android and nanoFramework library workflows send `repository_dispatch: update-dependencies` to the repos in `dependents` and the listeners found in the `discover-dependents` accounts. A listener is a workflow that takes `update-dependencies` and calls the platform's updater (`dotnet-`, `android-` or `nanoframework-update-dependencies.yml`), which opens the bump PR.
+After a publish, the .NET and Android library workflows (and a nanoFramework library's `dependents` caller job) send `repository_dispatch: update-dependencies` to the repos in `dependents` and the listeners found in the `discover-dependents` accounts. A listener is a workflow that takes `update-dependencies` and calls the platform's updater (`dotnet-`, `android-` or `nanoframework-update-dependencies.yml`), which opens the bump PR.
 
 ### Opt-in dispatch
 
@@ -75,6 +75,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `update-package-versions`: sets package ids to one version in every tracked `Directory.Packages.props`.
 - `setup-nanoframework`, `build-nanoframework`: nanobuild, MSBuild and NuGet CLI (Windows); locked restore and Release build stamped with nbgv.
 - `nanoframework-package-lock`, `nanoframework-packages-updated`: the nanoFramework PR checks.
+- `nuget-org-publish`: pushes the run's `nuget-packages` artifact to nuget.org with Trusted Publishing (`NuGet/login`), then `nuget-wait`. Use it from a job in the caller's own workflow file: nuget.org matches the policy against that file.
 - `nuget-wait`: waits until a feed's flat container (exact restore) or registration index ("latest") lists every package version.
 - `maven-wait`: waits until a Maven repository's `maven-metadata.xml` lists the version for every artifact.
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
@@ -110,6 +111,6 @@ That repo is archived; its workflows live here now.
 | `nanoframework-update-dependencies.yml` | `nanoframework-update-dependencies.yml` (same inputs) |
 | `.github/actions/setup-nanoframework`, `build-nanoframework` | `ccswe-apps/actions/.github/actions/setup-nanoframework`, `build-nanoframework` |
 
-- The library workflow takes `NUGET_API_KEY` (was `NUGET_ORG_API_KEY`), publishes only when `src`, `version.json`, `Directory.Build.props` or `nuget.config` change, and adds `discover-dependents` next to `dependents`.
+- The library workflow takes no nuget.org key: the caller's `publish` job uses Trusted Publishing (a nuget.org policy for the caller repo and workflow file). It publishes only when `src`, `version.json`, `Directory.Build.props` or `nuget.config` change, and adds `discover-dependents` next to `dependents`.
 - Dependents are found by a listener calling `ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml`; update the listener when the library switches.
 - Check names stay `pipeline / build`, `pipeline / package-lock`, `pipeline / packages-updated`.

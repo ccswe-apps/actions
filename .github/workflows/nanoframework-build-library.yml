@@ -8,10 +8,11 @@ name: nanoframework-build-library
 #                     push, version-changed decides whether to publish
 #   package-lock      PR only: every .nfproj in the solution has a packages.lock.json
 #   packages-updated  (Windows) PR only: `nuget update` leaves the tree unchanged
-#   publish           push to nuget.org, then wait until its registration index lists every
-#                     package (nanodu resolves "latest" there)
-#   dependents        dispatch-dependents.yml: listeners calling nanoframework-update-dependencies.yml
 #   dependabot        merge / update-behind (dependabot.yml)
+#
+# Publishing and dependents are caller jobs gated on this workflow's outputs: nuget.org Trusted
+# Publishing only matches a job defined in the caller's own workflow file (nuget-org-publish).
+# The caller repo needs a nuget.org Trusted Publishing policy naming it and this file's name.
 #
 # Caller shape:
 #
@@ -26,7 +27,44 @@ name: nanoframework-build-library
 #         discover-dependents: |   # accounts to scan (trusted only; the App is public)
 #           <owner>
 #       secrets:
-#         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+#     # Push to nuget.org, then wait until its registration index lists every package
+#     # (nanodu resolves "latest" there).
+#     publish:
+#       needs: pipeline
+#       if: needs.pipeline.outputs.publish == 'true'
+#       runs-on: ubuntu-latest
+#       timeout-minutes: 45
+#       permissions:
+#         contents: read
+#         id-token: write
+#       outputs:
+#         indexed: ${{ steps.publish.outputs.indexed }}
+#       steps:
+#         - id: publish
+#           uses: ccswe-apps/actions/.github/actions/nuget-org-publish@master
+#           with:
+#             user: <nuget.org profile name>
+#             packages: ${{ needs.pipeline.outputs.packages }}
+#             version: ${{ needs.pipeline.outputs.version }}
+#             index: registration
+#
+#     # Runs on every build (PRs log the discovered set); sends only once nuget.org serves the publish.
+#     dependents:
+#       needs: [pipeline, publish]
+#       if: ${{ !cancelled() && needs.pipeline.result == 'success' && needs.pipeline.outputs.owners != '' }}
+#       permissions:
+#         contents: read
+#       uses: ccswe-apps/actions/.github/workflows/dispatch-dependents.yml@master
+#       with:
+#         owners: ${{ needs.pipeline.outputs.owners }}
+#         updater: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml
+#         version: ${{ needs.pipeline.outputs.version }}
+#         packages: ${{ needs.pipeline.outputs.packages }}
+#         send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
+#       secrets:
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 #
@@ -49,12 +87,22 @@ on:
         type: string
         default: ''
     secrets:
-      NUGET_API_KEY:
-        required: false
       AUTOMATION_APP_ID:
         required: true
       AUTOMATION_APP_KEY:
         required: true
+    outputs:
+      publish:
+        description: "'true' on a default-branch push that changed something packable."
+        value: ${{ jobs.build.outputs.publish }}
+      version:
+        value: ${{ jobs.build.outputs.version }}
+      packages:
+        description: JSON array of package ids.
+        value: ${{ jobs.build.outputs.packages }}
+      owners:
+        description: dispatch-dependents' `owners`; empty without dependents or discover-dependents.
+        value: ${{ jobs.build.outputs.owners }}
 
 jobs:
   # No `name:`, so the check is `<caller job> / build`.
@@ -152,58 +200,6 @@ jobs:
       - uses: $/.github/actions/nanoframework-packages-updated
         with:
           solution: ${{ inputs.solution }}
-
-  publish:
-    needs: build
-    if: needs.build.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    outputs:
-      indexed: ${{ steps.wait.outputs.indexed }}
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: nuget-packages
-          path: nupkg
-
-      # A matching .snupkg is pushed with each .nupkg.
-      - name: Push to nuget.org
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NUGET_API_KEY is required to publish"
-            exit 1
-          fi
-          dotnet nuget push "nupkg/*.nupkg" --source https://api.nuget.org/v3/index.json \
-            --api-key "$NUGET_API_KEY" --skip-duplicate
-
-      - id: wait
-        uses: $/.github/actions/nuget-wait
-        with:
-          source: https://api.nuget.org/v3/index.json
-          packages: ${{ needs.build.outputs.packages }}
-          version: ${{ needs.build.outputs.version }}
-          index: registration
-
-  # Runs on every build (PRs log the discovered set); sends only once nuget.org serves the publish.
-  dependents:
-    needs: [build, publish]
-    if: always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '')
-    permissions:
-      contents: read
-    uses: $/.github/workflows/dispatch-dependents.yml
-    with:
-      owners: ${{ needs.build.outputs.owners }}
-      updater: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml
-      version: ${{ needs.build.outputs.version }}
-      packages: ${{ needs.build.outputs.packages }}
-      send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
-    secrets:
-      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
-      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 
   dependabot:
     needs: build
