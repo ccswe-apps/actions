@@ -12,7 +12,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
 | `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking) |
 | `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push; then prunes old image versions) · `dependabot` |
-| `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (nuget.org with `NUGET_API_KEY`, else GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot` |
+| `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot`. With `nuget-org: true`, `publish` (`nuget-org-publish`) and `dependents` are caller jobs; see the header |
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |
 | `dotnet-update-dependencies.yml` | `update` (consumer side of `dependents`: bump, PR, auto-merge unless major) |
 | `nanoframework-build-app.yml` | `build` (Windows) · `package-lock` · `packages-updated` (PRs) · `dependabot` |
@@ -22,7 +22,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
 | `npm-release-action.yml` | on a version tag: `verify` (tag on the default branch, `npm-build` with the `dist/` check) → `publish` (GitHub Release) → `major` (move the major tag) |
 | `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
-| `dispatch-dependents.yml` | nested in the .NET and Android library workflows, a caller job for nanoFramework libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
+| `dispatch-dependents.yml` | nested in the GitHub Packages library workflows, a caller job for nuget.org libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
 | `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
 
 The caller shape, inputs and contract are in each workflow's header.
@@ -35,7 +35,7 @@ Callers:
 
 ## Dependents
 
-After a publish, the .NET and Android library workflows (and a nanoFramework library's `dependents` caller job) send `repository_dispatch: update-dependencies` to the repos in `dependents` and the listeners found in the `discover-dependents` accounts. A listener is a workflow that takes `update-dependencies` and calls the platform's updater (`dotnet-`, `android-` or `nanoframework-update-dependencies.yml`), which opens the bump PR.
+After a publish, the library workflows (or, for a nuget.org library, its `dependents` caller job) send `repository_dispatch: update-dependencies` to the repos in `dependents` and the listeners found in the `discover-dependents` accounts. A listener is a workflow that takes `update-dependencies` and calls the platform's updater (`dotnet-`, `android-` or `nanoframework-update-dependencies.yml`), which opens the bump PR.
 
 ### Opt-in dispatch
 

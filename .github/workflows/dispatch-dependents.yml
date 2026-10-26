@@ -1,7 +1,7 @@
 name: dispatch-dependents
 
-# Reusable workflow (called by the library workflows, and by nanoFramework library callers after
-# their publish job): finds a library's dependents and,
+# Reusable workflow (called by the library workflows, and by nuget.org library callers after their
+# publish job): finds a library's dependents and,
 # when `send` is true, sends each `repository_dispatch: update-dependencies` with
 # client_payload {source, version, packages}.
 #
