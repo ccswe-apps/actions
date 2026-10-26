@@ -15,7 +15,7 @@ description: Wait until a NuGet feed serves every package at a version.
 #
 # index: flat-container (PackageBaseAddress) is what an exact-version restore reads;
 # registration (RegistrationsBaseUrl/3.6.0) is what "latest" resolvers read. Polls every
-# 30s for up to 30 minutes; on timeout `indexed` is 'false' with a warning, not a failure.
+# 30s for up to 10 minutes; on timeout `indexed` is 'false' with a warning, not a failure.
 
 inputs:
   source:
