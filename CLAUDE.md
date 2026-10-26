@@ -6,6 +6,7 @@ Public reusable workflows (`.github/workflows/`) and composite actions (`.github
 
 - **Here:** owner-agnostic pieces, such as build composites, app and library workflows, and Dependabot.
 - **Owner repos:** deploys and distribution that only one owner uses (e.g. Midworld: `midworld-apps/ci` Rollout, `midworld-apps/manifests` bump). They run as extra caller jobs gated on this repo's workflow outputs. Never wrap these workflows in another reusable workflow: that renames the required check (`pipeline / build / build`).
+- **nuget.org publishing** is a caller job using `nuget-org-publish`: Trusted Publishing matches the policy against the job's own workflow file (`job_workflow_ref`), which is never a reusable workflow here.
 
 ## Conventions
 

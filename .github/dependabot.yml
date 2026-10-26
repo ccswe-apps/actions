@@ -26,6 +26,7 @@ updates:
       - /.github/actions/dotnet-build
       - /.github/actions/gradle-build
       - /.github/actions/npm-build
+      - /.github/actions/nuget-org-publish
       - /.github/actions/setup-nanoframework
     schedule:
       interval: weekly

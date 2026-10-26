@@ -1,0 +1,75 @@
+name: nuget-org-publish
+description: Push a run's nuget-packages artifact to nuget.org with Trusted Publishing, then wait until nuget.org serves it.
+
+# nuget.org matches a Trusted Publishing policy against the OIDC token's `repository` and
+# `job_workflow_ref`, so the job using this must be defined in the caller's own workflow file
+# (a job inside a reusable workflow from this repo never matches). The job needs
+# `id-token: write`; the policy names the caller repo and its workflow file.
+#
+#   publish:
+#     needs: pipeline
+#     if: needs.pipeline.outputs.publish == 'true'
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#       id-token: write
+#     outputs:
+#       indexed: ${{ steps.publish.outputs.indexed }}
+#     steps:
+#       - id: publish
+#         uses: ccswe-apps/actions/.github/actions/nuget-org-publish@master
+#         with:
+#           user: <nuget.org profile name>
+#           packages: ${{ needs.pipeline.outputs.packages }}
+#           version: ${{ needs.pipeline.outputs.version }}
+#           index: registration   # nuget-wait's index; default flat-container
+#
+# A matching .snupkg is pushed with each .nupkg.
+
+inputs:
+  user:
+    description: nuget.org profile name (a user, not an organization) that owns the policy or belongs to its organization.
+    required: true
+  packages:
+    description: JSON array of package ids.
+    required: true
+  version:
+    description: Package version.
+    required: true
+  index:
+    description: What to wait for (nuget-wait), flat-container or registration.
+    default: flat-container
+
+outputs:
+  indexed:
+    description: "'true' when nuget.org serves every package, else 'false'."
+    value: ${{ steps.wait.outputs.indexed }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: nuget-packages
+        path: nupkg
+
+    - id: login
+      uses: NuGet/login@v1
+      with:
+        user: ${{ inputs.user }}
+
+    - shell: bash
+      env:
+        NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+      run: '"$GITHUB_ACTION_PATH/push.sh"'
+
+    - id: wait
+      shell: bash
+      env:
+        SOURCE: https://api.nuget.org/v3/index.json
+        PACKAGES: ${{ inputs.packages }}
+        VERSION: ${{ inputs.version }}
+        INDEX: ${{ inputs.index }}
+        FEED_USERNAME: ''
+        FEED_PASSWORD: ''
+      run: '"$GITHUB_ACTION_PATH/../nuget-wait/nuget-wait.sh"'
