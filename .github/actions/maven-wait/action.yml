@@ -12,8 +12,9 @@ description: Wait until a Maven repository serves every artifact at a version.
 #       username: ${{ github.actor }}                      # with password, for authenticated repositories
 #       password: ${{ github.token }}
 #
-# Reads each artifact's maven-metadata.xml. Polls every 30s for up to 30 minutes; on timeout
-# `served` is 'false' with a warning, not a failure.
+# Reads each artifact's maven-metadata.xml. Polls every 30s for up to 45 minutes on a public
+# repo (free runner minutes), 5 on a private one; on timeout `served` is 'false' with a
+# warning, not a failure.
 
 inputs:
   url:
@@ -48,4 +49,5 @@ runs:
         VERSION: ${{ inputs.version }}
         MAVEN_USERNAME: ${{ inputs.username }}
         MAVEN_PASSWORD: ${{ inputs.password }}
+        REPO_PRIVATE: ${{ github.event.repository.private }}
       run: '"$GITHUB_ACTION_PATH/maven-wait.sh"'

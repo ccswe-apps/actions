@@ -72,4 +72,5 @@ runs:
         INDEX: ${{ inputs.index }}
         FEED_USERNAME: ''
         FEED_PASSWORD: ''
+        REPO_PRIVATE: ${{ github.event.repository.private }}
       run: '"$GITHUB_ACTION_PATH/../nuget-wait/nuget-wait.sh"'

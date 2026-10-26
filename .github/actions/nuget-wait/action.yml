@@ -15,7 +15,8 @@ description: Wait until a NuGet feed serves every package at a version.
 #
 # index: flat-container (PackageBaseAddress) is what an exact-version restore reads;
 # registration (RegistrationsBaseUrl/3.6.0) is what "latest" resolvers read. Polls every
-# 30s for up to 10 minutes; on timeout `indexed` is 'false' with a warning, not a failure.
+# 30s for up to 45 minutes on a public repo (free runner minutes), 5 on a private one; on
+# timeout `indexed` is 'false' with a warning, not a failure.
 
 inputs:
   source:
@@ -54,4 +55,5 @@ runs:
         INDEX: ${{ inputs.index }}
         FEED_USERNAME: ${{ inputs.username }}
         FEED_PASSWORD: ${{ inputs.password }}
+        REPO_PRIVATE: ${{ github.event.repository.private }}
       run: '"$GITHUB_ACTION_PATH/nuget-wait.sh"'

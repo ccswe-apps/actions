@@ -1,6 +1,6 @@
-# Check how often nuget-wait times out
+# Check how often the feed waits time out
 
-`nuget-wait` polls every 30s for up to 10 minutes (`.github/actions/nuget-wait/nuget-wait.sh`). It was cut from 30 minutes on 2026-10-26 because the whole wait is billed as runner minutes. On a timeout `indexed` is false and the library's `dependents` job sends nothing. That's acceptable: dependents can't restore an unserved version anyway, so the bump can be dispatched by hand or picked up by Dependabot.
+`nuget-wait` and `maven-wait` poll every 30s for up to 45 minutes on public repos (runner minutes are free) and 5 on private ones (billed). Since 2026-10-26 the deadline comes from `github.event.repository.private`. On a timeout `indexed` is false and the library's `dependents` job sends nothing. That's acceptable: dependents can't restore an unserved version anyway, so the bump can be dispatched by hand or picked up by Dependabot.
 
 ## Measured with the 30-minute deadline (2026-10-26)
 
@@ -16,5 +16,5 @@ To re-measure, scan the `publish` / `pipeline / publish` job logs of the master 
 
 ## Steps
 
-1. After a few weeks of nuget.org publishes, count the `publish` jobs that logged `not served by ... after 10 minutes` against those that were served (scan as above).
-2. If timeouts are common, the missed dispatches are the cost; decide whether that's acceptable or the deadline should change. Otherwise delete this file.
+1. After a few weeks of publishes, count, per repo, the `publish` jobs that logged `not served by ... after N minutes` against those that were served (scan as above).
+2. If timeouts are common, retune the public or private deadline (`nuget-wait.sh`, `maven-wait.sh`, and their `action.yml` headers). Otherwise delete this file.

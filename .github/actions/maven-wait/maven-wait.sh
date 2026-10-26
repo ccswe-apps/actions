@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Polls each group:name in PACKAGES under REPOSITORY_URL until its maven-metadata.xml lists
-# VERSION (30s interval, 30-minute deadline). Writes served=true|false to GITHUB_OUTPUT.
+# VERSION (30s interval; 45-minute deadline on public repos, whose runner minutes are free, 5 on
+# private ones or when REPO_PRIVATE is unset). Writes served=true|false to GITHUB_OUTPUT.
 set -euo pipefail
 
 curl_args=(-sfL)
@@ -14,11 +15,13 @@ served() {
     grep -F "<version>${VERSION}</version>" > /dev/null
 }
 
-deadline=$((SECONDS + 30 * 60))
+minutes=5
+[ "${REPO_PRIVATE:-}" = false ] && minutes=45
+deadline=$((SECONDS + minutes * 60))
 for coordinate in $(jq -r '.[]' <<< "$PACKAGES"); do
   until served "$coordinate"; do
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "::warning::$coordinate $VERSION not served by $REPOSITORY_URL after 30 minutes"
+      echo "::warning::$coordinate $VERSION not served by $REPOSITORY_URL after $minutes minutes"
       echo "served=false" >> "$GITHUB_OUTPUT"
       exit 0
     fi
