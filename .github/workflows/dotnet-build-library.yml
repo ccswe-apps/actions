@@ -1,19 +1,19 @@
 name: dotnet-build-library
 
-# Reusable workflow for .NET library repos published to GitHub Packages or nuget.org.
+# Reusable workflow for .NET library repos published to GitHub Packages or (from a caller job) nuget.org.
 #
 # Pipeline:
 #   build       dependents-plan (the per-account `owners` for dependents), then
 #               .github/actions/dotnet-build on `path` (unit and integration tests),
 #               .github/actions/dotnet-pack, and dotnet-validate when validate-packages
-#   publish     push the packages (and .snupkg) to nuget.org when NUGET_API_KEY is
-#               passed, else nuget.pkg.github.com/<owner> (default-branch push that
-#               changed something packable), then wait until the feed serves them
+#   publish     push the packages to nuget.pkg.github.com/<owner> (default-branch push
+#               that changed something packable), then wait until the feed serves them;
+#               skipped with `nuget-org` (see below)
 #   dependents  find dependents (`dependents` plus the listeners discovered in the
 #               `discover-dependents` accounts); once the feed serves the
 #               packages, send each `update-dependencies`. With `dispatch: opt-in`,
 #               only the listeners the PR body names (`Update-Dependents:` lines,
-#               dependents-opt-in); a push naming none skips discovery
+#               dependents-opt-in); a push naming none skips discovery. Skipped with `nuget-org`
 #   dependabot  dependabot.yml: merge non-major Dependabot PRs, update behind bot PRs
 #
 # Caller shape:
@@ -31,7 +31,57 @@ name: dotnet-build-library
 #           <owner>
 #         dispatch: opt-in              # optional: default `all`
 #       secrets:
-#         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}   # optional: publish to nuget.org
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# nuget.org: Trusted Publishing only matches a job defined in the caller's own workflow file
+# (nuget-org-publish), so with `nuget-org: true` publish and dependents are caller jobs gated on
+# this workflow's outputs. The caller repo needs a nuget.org policy naming it and its workflow file.
+#
+#   jobs:
+#     pipeline:
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@master
+#       with:
+#         nuget-org: true
+#         discover-dependents: |
+#           <owner>
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+#     publish:
+#       needs: pipeline
+#       if: needs.pipeline.outputs.publish == 'true'
+#       runs-on: ubuntu-latest
+#       timeout-minutes: 45
+#       permissions:
+#         contents: read
+#         id-token: write
+#       outputs:
+#         indexed: ${{ steps.publish.outputs.indexed }}
+#       steps:
+#         - id: publish
+#           uses: ccswe-apps/actions/.github/actions/nuget-org-publish@master
+#           with:
+#             user: <nuget.org profile name>
+#             packages: ${{ needs.pipeline.outputs.packages }}
+#             version: ${{ needs.pipeline.outputs.version }}
+#
+#     # Runs on every build (PRs log the discovered set); sends only once nuget.org serves the publish.
+#     dependents:
+#       needs: [pipeline, publish]
+#       if: ${{ !cancelled() && needs.pipeline.result == 'success' && needs.pipeline.outputs.owners != '' }}
+#       permissions:
+#         contents: read
+#       uses: ccswe-apps/actions/.github/workflows/dispatch-dependents.yml@master
+#       with:
+#         owners: ${{ needs.pipeline.outputs.owners }}
+#         updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
+#         version: ${{ needs.pipeline.outputs.version }}
+#         packages: ${{ needs.pipeline.outputs.packages }}
+#         only: ${{ needs.pipeline.outputs.only }}
+#         send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
+#       secrets:
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 #
@@ -69,14 +119,30 @@ on:
       dotnet-version:
         type: string
         default: '10.0.x'
+      nuget-org:
+        description: The caller's publish job pushes to nuget.org (nuget-org-publish); skips publish and dependents here.
+        type: boolean
+        default: false
     secrets:
-      NUGET_API_KEY:
-        description: nuget.org API key; when set, packages go to nuget.org instead of GitHub Packages.
-        required: false
       AUTOMATION_APP_ID:
         required: true
       AUTOMATION_APP_KEY:
         required: true
+    outputs:
+      publish:
+        description: "'true' on a default-branch push that changed something packable."
+        value: ${{ jobs.build.outputs.publish }}
+      version:
+        value: ${{ jobs.build.outputs.package-version }}
+      packages:
+        description: JSON array of package ids.
+        value: ${{ jobs.build.outputs.packages }}
+      owners:
+        description: dispatch-dependents' `owners`; empty without dependents or discover-dependents.
+        value: ${{ jobs.build.outputs.owners }}
+      only:
+        description: "dispatch-dependents' `only` (`*` with `dispatch: all`)."
+        value: ${{ jobs.build.outputs.only }}
 
 jobs:
   build:
@@ -90,7 +156,7 @@ jobs:
       package-version: ${{ steps.build.outputs.package-version }}
       packages: ${{ steps.pack.outputs.packages }}
       publish: ${{ steps.publish.outputs.publish }}
-      only: ${{ steps.opt-in.outputs.only }}
+      only: ${{ inputs.dispatch == 'all' && '*' || steps.opt-in.outputs.only }}
       owners: ${{ steps.plan.outputs.owners }}
     steps:
       - name: Check dispatch
@@ -172,7 +238,7 @@ jobs:
 
   publish:
     needs: build
-    if: needs.build.outputs.publish == 'true'
+    if: needs.build.outputs.publish == 'true' && !inputs.nuget-org
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -181,7 +247,6 @@ jobs:
     outputs:
       indexed: ${{ steps.wait.outputs.indexed }}
     env:
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v8
@@ -193,24 +258,16 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
-      # nuget.org with NUGET_API_KEY, else GitHub Packages with GITHUB_TOKEN. A matching
-      # .snupkg is pushed with each .nupkg where the feed accepts symbols.
       - name: Push
         id: push
         env:
           OWNER: ${{ github.repository_owner }}
         run: |
-          if [ -n "$NUGET_API_KEY" ]; then
-            source=https://api.nuget.org/v3/index.json
-            key="$NUGET_API_KEY"
-          else
-            source="https://nuget.pkg.github.com/${OWNER}/index.json"
-            key="$GITHUB_TOKEN"
-            dotnet nuget add source --name github --username "$GITHUB_ACTOR" --password "$GITHUB_TOKEN" \
-              --store-password-in-clear-text "$source"
-          fi
+          source="https://nuget.pkg.github.com/${OWNER}/index.json"
+          dotnet nuget add source --name github --username "$GITHUB_ACTOR" --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text "$source"
           echo "source=$source" >> "$GITHUB_OUTPUT"
-          dotnet nuget push "nupkg/*.nupkg" --source "$source" --api-key "$key" --skip-duplicate
+          dotnet nuget push "nupkg/*.nupkg" --source "$source" --api-key "$GITHUB_TOKEN" --skip-duplicate
 
       # Dependents restore the exact version, so wait until the feed's flat container lists it.
       - id: wait
@@ -219,14 +276,14 @@ jobs:
           source: ${{ steps.push.outputs.source }}
           packages: ${{ needs.build.outputs.packages }}
           version: ${{ needs.build.outputs.package-version }}
-          username: ${{ secrets.NUGET_API_KEY == '' && github.actor || '' }}
-          password: ${{ secrets.NUGET_API_KEY == '' && github.token || '' }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
   # Runs on every build (PRs log the discovered set); sends only once the feed serves the publish.
   dependents:
     needs: [build, publish]
     if: >-
-      always() && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '') &&
+      always() && !inputs.nuget-org && needs.build.result == 'success' && (inputs.dependents != '' || inputs.discover-dependents != '') &&
       (inputs.dispatch == 'all' || inputs.dependents != '' || needs.build.outputs.only != '' || github.event_name == 'pull_request')
     permissions:
       contents: read
@@ -236,7 +293,7 @@ jobs:
       updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml
       version: ${{ needs.build.outputs.package-version }}
       packages: ${{ needs.build.outputs.packages }}
-      only: ${{ inputs.dispatch == 'all' && '*' || needs.build.outputs.only }}
+      only: ${{ needs.build.outputs.only }}
       send: ${{ needs.publish.result == 'success' && needs.publish.outputs.indexed == 'true' }}
     secrets:
       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
