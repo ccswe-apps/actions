@@ -26,7 +26,7 @@ name: android-build-library
 #       uses: ccswe-apps/actions/.github/workflows/android-build-library.yml@master
 #       with:
 #         tasks: assembleRelease test lintRelease
-#         version-files: buildSrc/src/main/kotlin/_Versions_.kt
+#         version-files: buildSrc/src/main/kotlin/Versions.kt
 #         discover-dependents: |       # optional: accounts to scan (trusted only; the App is public)
 #           <owner>
 #         dispatch: opt-in              # optional: default `all`
