@@ -22,6 +22,7 @@ updates:
   - package-ecosystem: github-actions
     directories:
       - /
+      - /.github/actions/android-play-publish
       - /.github/actions/build-nanoframework
       - /.github/actions/dotnet-build
       - /.github/actions/gradle-build

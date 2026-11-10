@@ -506,8 +506,41 @@ jobs:
         run: |
           [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
 
+  # android-play-publish --dry-run: phone and Wear tracks, a missing mapping warns, bad trees fail.
+  fixture-android-play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PACKAGE_NAME: com.example.fixture
+      WEAR_MODULES: ':wear'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Assert
+        run: |
+          dir="$RUNNER_TEMP/play"
+          mkdir -p "$dir/app" "$dir/wear"
+          touch "$dir/app/app-release.aab" "$dir/app/mapping.txt" "$dir/wear/wear-release.aab"
+          dry_run() {
+            ARTIFACT_DIR="$dir" python3 .github/actions/android-play-publish/play_publish.py --dry-run
+          }
+          out="$(dry_run)"
+          echo "$out"
+          for line in \
+            'app: app/app-release.aab, app/mapping.txt -> internal' \
+            'wear: wear/wear-release.aab -> wear:internal' \
+            '::warning::No mapping.txt for wear; Play gets no deobfuscation file' \
+            'status: completed' \
+            'dry run: no requests made'; do
+            grep -qxF "$line" <<< "$out" || { echo "::error::missing line: $line"; exit 1; }
+          done
+          if RELEASE_STATUS=inProgress dry_run; then echo "::error::invalid release status accepted"; exit 1; fi
+          if WEAR_MODULES='wear watch' dry_run; then echo "::error::missing wear module accepted"; exit 1; fi
+          touch "$dir/app/app-debug.aab"
+          if dry_run; then echo "::error::two AABs in one module accepted"; exit 1; fi
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-android-update, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
     permissions:
       contents: read
       pull-requests: read
