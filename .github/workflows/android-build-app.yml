@@ -7,11 +7,15 @@ name: android-build-app
 #               assembleRelease only, and the APK uploaded as the `release-apk` artifact.
 #               `tasks` and the coverage upload are skipped there: the required check already
 #               ran them on the same tree (the ruleset requires up-to-date branches).
+#               With `bundle-modules`, the release runs `:<module>:bundleRelease` for each
+#               module instead and uploads the `release-aab` artifact: `<module>/<name>.aab`
+#               and `<module>/mapping.txt` (when R8 wrote one) for each module.
 #   dependabot  merge / update-behind (dependabot.yml)
 #
 # Outputs: release ('true' when the build released), version-name, version-code,
-# file-name (the APK inside the `release-apk` artifact). Distribution is the caller's
-# job, e.g. a second job gated on `needs.pipeline.outputs.release == 'true'`.
+# file-name (the APK inside the `release-apk` artifact). With `bundle-modules`, only
+# release is set. Distribution is the caller's job, e.g. a second job gated on
+# `needs.pipeline.outputs.release == 'true'`.
 #
 # Caller shape:
 #
@@ -26,6 +30,7 @@ name: android-build-app
 #         version-files: buildSrc/src/main/java/Versions.kt
 #         signing-key-alias: ${{ vars.SIGNING_KEY_ALIAS }}
 #         coverage-path: my-app/build/reports/kover/    # optional; tasks must produce it
+#         bundle-modules: phone wear                    # optional: AABs instead of the APK
 #       secrets:
 #         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}               # optional: private Maven feed
 #         SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -37,13 +42,14 @@ name: android-build-app
 # App-repo contract: gradlew at the root; the release signing config reads
 # keystore.properties (storeFile=release.keystore, storePassword, keyAlias,
 # keyPassword) at the root when present; assembleRelease produces exactly one
-# APK under <app-module>/build/outputs/apk/release.
+# APK under <app-module>/build/outputs/apk/release; each bundle module's
+# bundleRelease produces its AAB under <module>/build/outputs/bundle/release.
 
 on:
   workflow_call:
     inputs:
       app-module:
-        description: Gradle module that produces the APK.
+        description: Gradle module that produces the APK (unused with `bundle-modules`).
         type: string
         required: true
       version-files:
@@ -66,6 +72,10 @@ on:
         default: ''
       coverage-path:
         description: Coverage report path uploaded as `coverage-report`; empty skips it.
+        type: string
+        default: ''
+      bundle-modules:
+        description: Space-separated Gradle modules whose release is an AAB (`release-aab`) instead of the APK.
         type: string
         default: ''
       timeout-minutes:
@@ -138,18 +148,30 @@ jobs:
           keyPassword=$SIGNING_KEY_PASSWORD
           EOF
 
+      - id: bundle
+        name: Plan bundle tasks
+        if: steps.version.outputs.changed == 'true' && inputs.bundle-modules != ''
+        env:
+          BUNDLE_MODULES: ${{ inputs.bundle-modules }}
+        run: |
+          tasks=()
+          for module in $BUNDLE_MODULES; do
+            tasks+=(":${module#:}:bundleRelease")
+          done
+          echo "tasks=${tasks[*]}" >> "$GITHUB_OUTPUT"
+
       - uses: $/.github/actions/gradle-build
         env:
           PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
         with:
           java-version: ${{ inputs.java-version }}
-          tasks: ${{ steps.version.outputs.changed == 'true' && 'assembleRelease' || inputs.tasks }}
+          tasks: ${{ steps.version.outputs.changed == 'true' && (steps.bundle.outputs.tasks || 'assembleRelease') || inputs.tasks }}
           gradle-properties: ${{ inputs.gradle-properties }}
           coverage-path: ${{ steps.version.outputs.changed != 'true' && inputs.coverage-path || '' }}
 
       - id: meta
         name: Read release metadata
-        if: steps.version.outputs.changed == 'true'
+        if: steps.version.outputs.changed == 'true' && inputs.bundle-modules == ''
         env:
           APK_DIR: ${{ inputs.app-module }}/build/outputs/apk/release
         run: |
@@ -170,11 +192,45 @@ jobs:
             echo "file-path=$APK_DIR/$file_name"
           } >> "$GITHUB_OUTPUT"
 
-      - if: steps.version.outputs.changed == 'true'
+      - if: steps.version.outputs.changed == 'true' && inputs.bundle-modules == ''
         uses: actions/upload-artifact@v7
         with:
           name: release-apk
           path: ${{ steps.meta.outputs.file-path }}
+          if-no-files-found: error
+
+      - id: bundles
+        name: Collect bundles
+        if: steps.version.outputs.changed == 'true' && inputs.bundle-modules != ''
+        env:
+          BUNDLE_MODULES: ${{ inputs.bundle-modules }}
+        run: |
+          shopt -s nullglob
+          out="$RUNNER_TEMP/release-aab"
+          for module in $BUNDLE_MODULES; do
+            dir=${module#:}
+            dir=${dir//://}
+            aabs=("$dir"/build/outputs/bundle/release/*.aab)
+            if [ ${#aabs[@]} -eq 0 ]; then
+              echo "::error::No AAB found under $dir/build/outputs/bundle/release"
+              exit 1
+            fi
+            mkdir -p "$out/$dir"
+            cp "${aabs[@]}" "$out/$dir/"
+            mapping="$dir/build/outputs/mapping/release/mapping.txt"
+            if [ -f "$mapping" ]; then
+              cp "$mapping" "$out/$dir/"
+            else
+              echo "::warning::No R8 mapping at $mapping"
+            fi
+          done
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      - if: steps.version.outputs.changed == 'true' && inputs.bundle-modules != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-aab
+          path: ${{ steps.bundles.outputs.path }}
           if-no-files-found: error
 
       - name: Clean up signing material

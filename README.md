@@ -8,7 +8,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 
 | Workflow | Jobs |
 |---|---|
-| `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact; tests ran on the PR) · `dependabot` |
+| `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact, or with `bundle-modules` each module's AAB and R8 mapping as `release-aab`; tests ran on the PR) · `dependabot` |
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
 | `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking) |
 | `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push; then prunes old image versions) · `dependabot` |
