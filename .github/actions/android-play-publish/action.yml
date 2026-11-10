@@ -1,0 +1,76 @@
+name: android-play-publish
+description: Publish a run's release-aab artifact to a Google Play track with workload identity federation.
+
+# The job needs `id-token: write`. `service-account` must be allowed to impersonate through
+# `workload-identity-provider` (roles/iam.workloadIdentityUser) and be invited in Play Console
+# with release permission on the app.
+#
+#   play:
+#     needs: pipeline
+#     if: needs.pipeline.outputs.release == 'true'
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#       id-token: write
+#     steps:
+#       - uses: ccswe-apps/actions/.github/actions/android-play-publish@master
+#         with:
+#           workload-identity-provider: ${{ vars.PLAY_WIF_PROVIDER }}
+#           service-account: ${{ vars.PLAY_SERVICE_ACCOUNT }}
+#           package-name: com.example.app
+#           wear-modules: wear   # optional: these modules go to wear:<track>
+#
+# Each `<module>/` in the artifact (android-build-app.yml `bundle-modules`) holds one AAB and
+# an optional `mapping.txt`. Everything goes in one edit, one release per track; the version
+# codes per track are in the job summary.
+
+inputs:
+  workload-identity-provider:
+    description: Workload identity provider resource name (projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>).
+    required: true
+  service-account:
+    description: Service account email to impersonate.
+    required: true
+  package-name:
+    description: Application id on Play.
+    required: true
+  track:
+    description: Track for phone modules; wear modules get wear:<track>.
+    default: internal
+  release-status:
+    description: completed or draft.
+    default: completed
+  wear-modules:
+    description: Space-separated Gradle modules published to wear:<track>.
+    default: ''
+  artifact:
+    description: Artifact name from this run.
+    default: release-aab
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/android-play-publish
+
+    - id: auth
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+        token_format: access_token
+        access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+        create_credentials_file: false
+        export_environment_variables: false
+
+    - shell: bash
+      env:
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        TRACK: ${{ inputs.track }}
+        RELEASE_STATUS: ${{ inputs.release-status }}
+        WEAR_MODULES: ${{ inputs.wear-modules }}
+        ARTIFACT_DIR: ${{ runner.temp }}/android-play-publish
+        PLAY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+      run: python3 "$GITHUB_ACTION_PATH/play_publish.py"

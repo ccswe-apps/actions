@@ -76,6 +76,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `setup-nanoframework`, `build-nanoframework`: nanobuild, MSBuild and NuGet CLI (Windows); locked restore and Release build stamped with nbgv.
 - `nanoframework-package-lock`, `nanoframework-packages-updated`: the nanoFramework PR checks.
 - `nuget-org-publish`: pushes the run's `nuget-packages` artifact to nuget.org with Trusted Publishing (`NuGet/login`), then `nuget-wait`. Use it from a job in the caller's own workflow file: nuget.org matches the policy against that file.
+- `android-play-publish`: publishes the run's `release-aab` artifact to a Google Play track in one edit (Wear modules to `wear:<track>`), with an access token from workload identity federation (`google-github-actions/auth`). Use it from a caller job with `id-token: write`; see the header.
 - `nuget-wait`: waits until a feed's flat container (exact restore) or registration index ("latest") lists every package version.
 - `maven-wait`: waits until a Maven repository's `maven-metadata.xml` lists the version for every artifact.
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
@@ -92,6 +93,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `fixture-dotnet-{pass,fail,no-tests,library,update}` (the .NET composites against `test/fixtures/dotnet`)
 - `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`, `dependents-plan`, and `dependents-opt-in` parsing)
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
+- `fixture-android-play` (`android-play-publish --dry-run` on a generated phone and Wear tree)
 - `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`)
 
 Inside this repo, workflows reference the composites with `$/` (`uses: $/.github/actions/gradle-build`). That resolves to this repo at the running commit, even when the workflow is called from another owner.
