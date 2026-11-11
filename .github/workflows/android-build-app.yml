@@ -168,6 +168,8 @@ jobs:
           tasks: ${{ steps.version.outputs.changed == 'true' && (steps.bundle.outputs.tasks || 'assembleRelease') || inputs.tasks }}
           gradle-properties: ${{ inputs.gradle-properties }}
           coverage-path: ${{ steps.version.outputs.changed != 'true' && inputs.coverage-path || '' }}
+          # Release builds skip the test tasks; cleanup would drop their dependencies from the cache.
+          cache-cleanup: ${{ steps.version.outputs.changed == 'true' && 'never' || 'on-success' }}
 
       - id: meta
         name: Read release metadata

@@ -81,7 +81,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `maven-wait`: waits until a Maven repository's `maven-metadata.xml` lists the version for every artifact.
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
 - `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check.
-- `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact.
+- `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact. The Android workflows' release builds pass `cache-cleanup: never`, so the saved dependency cache keeps the test-only dependencies.
 - `version-changed`: whether any watched file changed in the pushed range.
 
 ## Self-tests
