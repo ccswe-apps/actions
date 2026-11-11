@@ -33,6 +33,9 @@ inputs:
   coverage-path:
     description: Coverage report path, relative to working-directory; empty skips the upload.
     default: ''
+  cache-cleanup:
+    description: setup-gradle `cache-cleanup` (never, on-success, always).
+    default: on-success
 
 runs:
   using: composite
@@ -43,6 +46,8 @@ runs:
         java-version: ${{ inputs.java-version }}
 
     - uses: gradle/actions/setup-gradle@v6
+      with:
+        cache-cleanup: ${{ inputs.cache-cleanup }}
 
     - shell: bash
       env:
