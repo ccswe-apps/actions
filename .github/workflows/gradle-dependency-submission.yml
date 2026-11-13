@@ -1,0 +1,55 @@
+name: gradle-dependency-submission
+
+# Reusable workflow for Gradle repos: resolves every configuration in the build
+# (including buildSrc and plugin classpaths) and submits the dependency graph, so
+# Dependabot alerts cover what the Gradle manifests alone don't show.
+#
+#   submit      dependency-submission; nothing is built or tested, and the Gradle
+#               cache is only read.
+#
+# Caller shape:
+#
+#   on:
+#     schedule:
+#       - cron: '0 12 * * 1'
+#     workflow_dispatch:
+#   permissions:
+#     contents: write           # the Dependency Submission API
+#   jobs:
+#     dependencies:
+#       uses: ccswe-apps/actions/.github/workflows/gradle-dependency-submission.yml@master
+#       secrets:
+#         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}   # optional: private Maven feed
+#
+# Repo contract: gradlew at the root. A private feed reads PACKAGES_PAT from the
+# environment, as in the build workflows.
+
+on:
+  workflow_call:
+    secrets:
+      PACKAGES_PAT:
+        required: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/dependency-submission@v6
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        with:
+          dependency-graph: generate-and-submit
+          cache-read-only: true
+          # Raises Gradle's default 512m daemon heap for Android builds.
+          # One token: the action splits arguments on spaces.
+          additional-arguments: -Dorg.gradle.jvmargs=-Xmx3g
