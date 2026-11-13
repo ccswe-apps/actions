@@ -11,6 +11,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact, or with `bundle-modules` each module's AAB and R8 mapping as `release-aab`; tests ran on the PR) · `dependabot` |
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
 | `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking) |
+| `gradle-dependency-submission.yml` | `submit` (resolves every Gradle configuration, including `buildSrc` and plugin classpaths, and submits the dependency graph for Dependabot alerts; for a weekly `schedule` caller with `contents: write`; see the header) |
 | `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push; then prunes old image versions) · `dependabot` |
 | `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot`. With `nuget-org: true`, `publish` (`nuget-org-publish`) and `dependents` are caller jobs; see the header |
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |
