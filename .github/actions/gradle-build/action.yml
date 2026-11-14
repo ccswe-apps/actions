@@ -36,10 +36,18 @@ inputs:
   cache-cleanup:
     description: setup-gradle `cache-cleanup` (never, on-success, always).
     default: on-success
+  cache-read-only:
+    description: "'true' makes the Gradle cache read-only; otherwise setup-gradle's default (read-only off the default branch)."
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # Standard runners guarantee 14 GB free; a restored Gradle User Home plus an Android build can outgrow it.
+    - if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/free-disk.sh"'
+
     - uses: actions/setup-java@v6
       with:
         distribution: temurin
@@ -48,6 +56,8 @@ runs:
     - uses: gradle/actions/setup-gradle@v6
       with:
         cache-cleanup: ${{ inputs.cache-cleanup }}
+        # setup-gradle's own default, unless forced.
+        cache-read-only: ${{ inputs.cache-read-only == 'true' || (github.event.repository != null && github.ref_name != github.event.repository.default_branch) }}
 
     - shell: bash
       env:
