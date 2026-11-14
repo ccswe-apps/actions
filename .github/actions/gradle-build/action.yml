@@ -40,6 +40,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Standard runners guarantee 14 GB free; a restored Gradle User Home plus an Android build can outgrow it.
+    - if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/free-disk.sh"'
+
     - uses: actions/setup-java@v6
       with:
         distribution: temurin
