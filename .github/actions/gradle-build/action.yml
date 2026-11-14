@@ -36,6 +36,9 @@ inputs:
   cache-cleanup:
     description: setup-gradle `cache-cleanup` (never, on-success, always).
     default: on-success
+  cache-read-only:
+    description: "'true' makes the Gradle cache read-only; otherwise setup-gradle's default (read-only off the default branch)."
+    default: 'false'
 
 runs:
   using: composite
@@ -53,6 +56,8 @@ runs:
     - uses: gradle/actions/setup-gradle@v6
       with:
         cache-cleanup: ${{ inputs.cache-cleanup }}
+        # setup-gradle's own default, unless forced.
+        cache-read-only: ${{ inputs.cache-read-only == 'true' || (github.event.repository != null && github.ref_name != github.event.repository.default_branch) }}
 
     - shell: bash
       env:
