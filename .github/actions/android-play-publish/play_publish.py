@@ -92,7 +92,7 @@ def upload(url, token, path):
                    "application/octet-stream", timeout=900)
 
 
-def publish(package, status, modules, token):
+def publish(package, status, modules, token, priority=0):
     edits = f"{API}/{package}/edits"
     uploads = f"{UPLOAD}/{package}/edits"
     edit = request("POST", edits, token)["id"]
@@ -111,9 +111,9 @@ def publish(package, status, modules, token):
         for track, track_codes in codes.items():
             request("PUT", f"{edits}/{edit}/tracks/{track}", token, {
                 "track": track,
-                "releases": [{"versionCodes": track_codes, "status": status}],
+                "releases": [{"versionCodes": track_codes, "status": status, "inAppUpdatePriority": priority}],
             })
-            print(f"{track}: {', '.join(track_codes)} ({status})")
+            print(f"{track}: {', '.join(track_codes)} ({status}, update priority {priority})")
         request("POST", f"{edits}/{edit}:commit", token)
         print(f"Committed edit for {package}")
         return codes
@@ -135,6 +135,10 @@ def main():
         fail("PACKAGE_NAME is required")
     if status not in STATUSES:
         fail(f"RELEASE_STATUS {status} is not one of {', '.join(STATUSES)}")
+    raw_priority = os.environ.get("UPDATE_PRIORITY", "").strip() or "0"
+    if not raw_priority.isdigit() or not 0 <= int(raw_priority) <= 5:
+        fail(f"UPDATE_PRIORITY {raw_priority} is not 0-5")
+    priority = int(raw_priority)
     modules = plan(os.environ.get("ARTIFACT_DIR", "."), track, os.environ.get("WEAR_MODULES", ""))
 
     print(f"package: {package}")
@@ -144,6 +148,7 @@ def main():
         if not m["mapping"]:
             print(f"::warning::No mapping.txt for {m['name']}; Play gets no deobfuscation file")
     print(f"status: {status}")
+    print(f"in-app update priority: {priority}")
     if dry_run:
         print("dry run: no requests made")
         return
@@ -152,7 +157,7 @@ def main():
     if not token:
         fail("PLAY_ACCESS_TOKEN is required")
     try:
-        codes = publish(package, status, modules, token)
+        codes = publish(package, status, modules, token, priority)
     except PlayError as e:
         fail(str(e))
 

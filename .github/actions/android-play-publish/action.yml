@@ -19,6 +19,7 @@ description: Publish a run's release-aab artifact to a Google Play track with wo
 #           service-account: ${{ vars.PLAY_SERVICE_ACCOUNT }}
 #           package-name: com.example.app
 #           wear-modules: wear   # optional: these modules go to wear:<track>
+#           in-app-update-priority: 5   # optional: 0-5, for every release this edit creates
 #
 # Each `<module>/` in the artifact (android-build-app.yml `bundle-modules`) holds one AAB and
 # an optional `mapping.txt`. Everything goes in one edit, one release per track; the version
@@ -46,6 +47,9 @@ inputs:
   artifact:
     description: Artifact name from this run.
     default: release-aab
+  in-app-update-priority:
+    description: In-app update priority 0-5 for the new releases (Play sets it only when a release is created). Empty is 0.
+    default: ''
 
 runs:
   using: composite
@@ -70,6 +74,7 @@ runs:
         PACKAGE_NAME: ${{ inputs.package-name }}
         TRACK: ${{ inputs.track }}
         RELEASE_STATUS: ${{ inputs.release-status }}
+        UPDATE_PRIORITY: ${{ inputs.in-app-update-priority }}
         WEAR_MODULES: ${{ inputs.wear-modules }}
         ARTIFACT_DIR: ${{ runner.temp }}/android-play-publish
         PLAY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
