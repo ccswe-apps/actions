@@ -531,10 +531,13 @@ jobs:
             'wear: wear/wear-release.aab -> wear:internal' \
             '::warning::No mapping.txt for wear; Play gets no deobfuscation file' \
             'status: completed' \
+            'in-app update priority: 0' \
             'dry run: no requests made'; do
             grep -qxF "$line" <<< "$out" || { echo "::error::missing line: $line"; exit 1; }
           done
           if RELEASE_STATUS=inProgress dry_run; then echo "::error::invalid release status accepted"; exit 1; fi
+          UPDATE_PRIORITY=5 dry_run | grep -qxF 'in-app update priority: 5' || { echo "::error::priority 5 not passed"; exit 1; }
+          if UPDATE_PRIORITY=6 dry_run; then echo "::error::priority 6 accepted"; exit 1; fi
           if WEAR_MODULES='wear watch' dry_run; then echo "::error::missing wear module accepted"; exit 1; fi
           touch "$dir/app/app-debug.aab"
           if dry_run; then echo "::error::two AABs in one module accepted"; exit 1; fi
