@@ -34,6 +34,7 @@ name: dotnet-build-app
 # *.UnitTests.csproj projects (*.IntegrationTests.csproj are not run). With
 # publish-image, a multi-stage Dockerfile at the repo root restores using the
 # NUGET_AUTH_TOKEN build-arg in its build stage only.
+# SDK: `dotnet-version` if set, else the repo-root global.json (dotnet-sdk-version), else 10.0.x.
 
 on:
   workflow_call:
@@ -50,8 +51,9 @@ on:
         type: string
         default: src
       dotnet-version:
+        description: Explicit actions/setup-dotnet version; empty resolves from the repo-root global.json, else 10.0.x.
         type: string
-        default: '10.0.x'
+        default: ''
       keep-image-versions:
         type: number
         default: 10

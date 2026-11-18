@@ -542,8 +542,53 @@ jobs:
           touch "$dir/app/app-debug.aab"
           if dry_run; then echo "::error::two AABs in one module accepted"; exit 1; fi
 
+  fixture-dotnet-sdk-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Generated global.json files (BOM, CRLF and comments survive no checkout normalization).
+      - name: Assert
+        run: |
+          root="$RUNNER_TEMP/sdk"
+          resolve() {
+            local out="$RUNNER_TEMP/sdk-output"
+            : > "$out"
+            DOTNET_VERSION="$1" ROOT="$root" GITHUB_OUTPUT="$out" \
+              python3 .github/actions/dotnet-sdk-version/dotnet-sdk-version.py >&2 || return 1
+            sed -n '2p' "$out"
+          }
+          check() {
+            local name="$1" json="$2" expected="$3" actual
+            rm -rf "$root"; mkdir -p "$root"
+            [ -z "$json" ] || printf '%b' "$json" > "$root/global.json"
+            actual="$(resolve "${4:-}")" || { echo "::error::$name: resolve failed"; exit 1; }
+            [ "$actual" = "$expected" ] || { echo "::error::$name: got ${actual@Q}, expected $expected"; exit 1; }
+          }
+          check 'no file' '' '10.0.x'
+          check 'input wins' '{"sdk":{"version":"11.0.100"}}' '9.0.x' '9.0.x'
+          check '10.0.0 latestMinor' '{"sdk":{"version":"10.0.0","rollForward":"latestMinor","allowPrerelease":false}}' '10.0.x'
+          check '11.0.100 latestMinor' '{"sdk":{"version":"11.0.100","rollForward":"latestMinor"}}' '11.0.x'
+          check 'latestFeature' '{"sdk":{"version":"10.0.204","rollForward":"latestFeature"}}' '10.0.x'
+          check 'latestPatch' '{"sdk":{"version":"10.0.204","rollForward":"latestPatch"}}' '10.0.2xx'
+          check 'no rollForward' '{"sdk":{"version":"10.0.115"}}' '10.0.1xx'
+          check 'disable' '{"sdk":{"version":"10.0.115","rollForward":"disable"}}' '10.0.115'
+          check 'prerelease' '{"sdk":{"version":"11.0.100-rc.2.25502.107","rollForward":"latestMajor","allowPrerelease":true}}' '11.0.100-rc.2.25502.107'
+          # shellcheck disable=SC2016 # "$schema" is a literal JSON key
+          check 'BOM CRLF comments' '\xef\xbb\xbf{\r\n  // pin\r\n  "$schema": "https://json.schemastore.org/global.json",\r\n  "sdk": { /* band */ "version": "11.0.100", "rollForward": "latestMinor", },\r\n}\r\n' '11.0.x'
+          check 'msbuild-sdks only' '{"msbuild-sdks":{"Foo.Sdk":"1.0.0"}}' '10.0.x'
+          rm -rf "$root"; mkdir -p "$root"
+          multi="$(resolve $'8.0.x\n10.0.x')"
+          [ "$multi" = '8.0.x' ] || { echo "::error::multi-line input: got ${multi@Q}"; exit 1; }
+          grep -qx '10.0.x' "$RUNNER_TEMP/sdk-output" || { echo "::error::multi-line input truncated"; exit 1; }
+          for bad in '{"sdk":{"version":"11.0.100",' '{"sdk":{"version":"eleven"}}' '{"sdk":{"version":"11.0.100","rollForward":"sideways"}}'; do
+            printf '%s' "$bad" > "$root/global.json"
+            if resolve '' > /dev/null; then echo "::error::accepted ${bad@Q}"; exit 1; fi
+          done
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
     permissions:
       contents: read
       pull-requests: read

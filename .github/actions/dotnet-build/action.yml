@@ -36,9 +36,9 @@ inputs:
     required: false
     default: ''
   dotnet-version:
-    description: SDK version for actions/setup-dotnet.
+    description: Explicit actions/setup-dotnet version; empty resolves it like `dotnet-sdk-version` (repo-root global.json, else 10.0.x).
     required: false
-    default: '10.0.x'
+    default: ''
   artifact-name:
     description: Name of the uploaded test-results artifact.
     required: false
@@ -59,9 +59,23 @@ outputs:
 runs:
   using: composite
   steps:
+    # Runs the sibling script directly: `$/` from inside a composite is unproven.
+    - id: sdk
+      shell: python
+      env:
+        DOTNET_VERSION: ${{ inputs.dotnet-version }}
+        ROOT: ${{ github.workspace }}
+      run: |
+        import os, runpy
+        runpy.run_path(os.path.join(os.environ["GITHUB_ACTION_PATH"], "..", "dotnet-sdk-version", "dotnet-sdk-version.py"), run_name="__main__")
+
     - uses: actions/setup-dotnet@v6
       with:
-        dotnet-version: ${{ inputs.dotnet-version }}
+        dotnet-version: ${{ steps.sdk.outputs.sdk }}
+
+    - name: dotnet --version
+      shell: bash
+      run: dotnet --version
 
     - id: nbgv
       uses: dotnet/nbgv@v0.5.2
