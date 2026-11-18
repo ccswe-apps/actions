@@ -92,6 +92,7 @@ name: dotnet-build-library
 # listed account whose workflow takes `repository_dispatch: update-dependencies`
 # and calls dotnet-update-dependencies.yml; dependents receive client_payload
 # {source, version, packages}. Scanned repo names appear in the caller's run logs.
+# SDK: `dotnet-version` if set, else the repo-root global.json (dotnet-sdk-version), else 10.0.x.
 
 on:
   workflow_call:
@@ -117,8 +118,9 @@ on:
         type: boolean
         default: false
       dotnet-version:
+        description: Explicit actions/setup-dotnet version; empty resolves from the repo-root global.json, else 10.0.x.
         type: string
-        default: '10.0.x'
+        default: ''
       nuget-org:
         description: The caller's publish job pushes to nuget.org (nuget-org-publish); skips publish and dependents here.
         type: boolean
@@ -254,10 +256,7 @@ jobs:
           name: nuget-packages
           path: nupkg
 
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: ${{ inputs.dotnet-version }}
-
+      # No checkout here (no global.json); `dotnet nuget push` works on the preinstalled SDK.
       - name: Push
         id: push
         env:

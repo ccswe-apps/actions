@@ -1,0 +1,40 @@
+name: dotnet-sdk-version
+description: Resolve the actions/setup-dotnet version from an input, the repo-root global.json, or the 10.0.x fallback.
+
+# Run after checkout. The `dotnet-build` composite runs the script directly.
+#
+#   - id: sdk
+#     uses: $/.github/actions/dotnet-sdk-version
+#     with:
+#       dotnet-version: ${{ inputs.dotnet-version }}
+#   - uses: actions/setup-dotnet@<major>
+#     with:
+#       dotnet-version: ${{ steps.sdk.outputs.sdk }}
+#
+# Only the repo-root global.json counts: `dotnet` runs from the root and never sees a
+# deeper one. Its sdk.version maps to A.B.x (rollForward feature/minor/major and their
+# latest*, or an A.B.0 version), A.B.Cxx (patch, latestPatch, or none), or the exact
+# version (prerelease, disable). A malformed global.json fails.
+
+inputs:
+  dotnet-version:
+    description: Explicit setup-dotnet version (passed through); empty resolves from global.json.
+    required: false
+    default: ''
+
+outputs:
+  sdk:
+    description: Version for actions/setup-dotnet `dotnet-version`.
+    value: ${{ steps.resolve.outputs.sdk }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: python
+      env:
+        DOTNET_VERSION: ${{ inputs.dotnet-version }}
+        ROOT: ${{ github.workspace }}
+      run: |
+        import os, runpy
+        runpy.run_path(os.path.join(os.environ["GITHUB_ACTION_PATH"], "dotnet-sdk-version.py"), run_name="__main__")
