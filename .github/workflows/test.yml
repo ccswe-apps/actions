@@ -614,7 +614,7 @@ jobs:
 
       - name: Assert installed
         run: |
-          banner="$(tailwindcss --help 2>&1 || true)"
+          banner="$(NO_COLOR=1 tailwindcss --help 2>&1 | sed -E $'s/\x1b\\[[0-9;]*m//g' || true)"
           [[ "${banner%%$'\n'*}" == *"tailwindcss v4.3.3"* ]] || { echo "::error::tailwindcss not on PATH: $banner"; exit 1; }
 
       - uses: $/.github/actions/setup-tailwind

@@ -40,7 +40,8 @@ curl -fsSL --retry 3 -o "$dir/sha256sums.txt" "$base/sha256sums.txt"
 (cd "$dir" && sha256sum -c --ignore-missing sha256sums.txt)
 
 install -m 0755 "$dir/$asset" "$dir/bin/tailwindcss"
-banner="$("$dir/bin/tailwindcss" --help 2>&1 || true)"
+# The banner is colored on CI runners; strip ANSI escapes before comparing.
+banner="$(NO_COLOR=1 "$dir/bin/tailwindcss" --help 2>&1 | sed -E $'s/\x1b\\[[0-9;]*m//g' || true)"
 banner="${banner%%$'\n'*}"
 if [[ "$banner" != *"tailwindcss $version"* ]]; then
   echo "::error::tailwindcss --help reported '$banner', expected tailwindcss $version"
