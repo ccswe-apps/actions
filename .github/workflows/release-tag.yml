@@ -1,0 +1,127 @@
+name: release-tag
+
+# Reusable workflow: cut a semver release of the caller repo from its default branch
+# and move the major tag.
+#
+#   verify      runs on the default branch only; required-checks (every required check
+#               passed on the commit); next-release-version (bump the highest vX.Y.Z)
+#   release     GitHub Release for the new tag with generated notes, created with the
+#               andy-the-messenger-robot App token (the tag ruleset allows only bypass
+#               actors to create v* tags)
+#   major       move-major-tag.yml: point the major tag (v1) at the release
+#
+# Caller shape (.github/workflows/release.yml):
+#
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         bump: { type: choice, options: [patch, minor, major], required: true }
+#   permissions:
+#     contents: read
+#     checks: read
+#   concurrency:
+#     group: release
+#     cancel-in-progress: false
+#   jobs:
+#     release:
+#       uses: ccswe-apps/actions/.github/workflows/release-tag.yml@v1
+#       with:
+#         bump: ${{ inputs.bump }}
+#       secrets:
+#         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+#         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
+#
+# Contract: the caller repo's "release tags" ruleset lists andy as a bypass actor
+# (repo-standards rulesets/release-tags.json).
+#
+# Semver (this repo and callers releasing with it):
+#   major   removed or renamed inputs, outputs or secrets; removed or renamed job ids that
+#           appear in required checks or outputs; newly required inputs, secrets or
+#           permissions; any other change callers must adapt to
+#   minor   new workflows or composites; new optional inputs or secrets
+#   patch   fixes
+# After a new major, the previous one is frozen.
+
+on:
+  workflow_call:
+    inputs:
+      bump:
+        description: patch, minor or major.
+        type: string
+        required: true
+    secrets:
+      AUTOMATION_APP_ID:
+        required: true
+      AUTOMATION_APP_KEY:
+        required: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      major: ${{ steps.next.outputs.major }}
+      previous: ${{ steps.next.outputs.previous }}
+    steps:
+      - name: Check the branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            echo "::error::Release from ${DEFAULT_BRANCH}, not ${GITHUB_REF}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/required-checks
+
+      - id: next
+        uses: $/.github/actions/next-release-version
+        with:
+          bump: ${{ inputs.bump }}
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PREVIOUS: ${{ needs.verify.outputs.previous }}
+        run: |
+          args=("$VERSION" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes)
+          if [[ -n "$PREVIOUS" ]]; then
+            args+=(--notes-start-tag "$PREVIOUS")
+          fi
+          gh release create "${args[@]}"
+
+  major:
+    needs: [verify, release]
+    permissions:
+      contents: read
+    uses: $/.github/workflows/move-major-tag.yml
+    with:
+      target: ${{ needs.verify.outputs.version }}
+      major: ${{ needs.verify.outputs.major }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

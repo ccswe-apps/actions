@@ -14,7 +14,7 @@ name: nanoframework-build-app
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: checks are `pipeline / build`, `/ package-lock`, `/ packages-updated`
-#       uses: ccswe-apps/actions/.github/workflows/nanoframework-build-app.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/nanoframework-build-app.yml@v1
 #       with:
 #         solution: My.sln
 #       secrets:

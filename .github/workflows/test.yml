@@ -645,8 +645,82 @@ jobs:
         run: |
           [ "$OUTCOME" = failure ] || { echo "::error::invalid ARG TAILWIND_VERSION accepted"; exit 1; }
 
+  fixture-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: next-release-version
+        run: |
+          script="$GITHUB_WORKSPACE/.github/actions/next-release-version/next-release-version.sh"
+          repo="$RUNNER_TEMP/release-repo"
+          rm -rf "$repo"; mkdir -p "$repo"; cd "$repo"
+          git init -q; git config user.email t@example.com; git config user.name t
+          commit() { git commit -q --allow-empty -m "$1"; }
+          next() {
+            local out="$RUNNER_TEMP/next-output"
+            : > "$out"
+            BUMP="$1" GITHUB_OUTPUT="$out" "$script" >&2 || return 1
+            tr '\n' ' ' < "$out" | sed 's/ $//'
+          }
+          check() {
+            local actual
+            actual="$(next "$1")" || { echo "::error::$1: failed"; exit 1; }
+            [ "$actual" = "$2" ] || { echo "::error::$1: got ${actual@Q}, expected ${2@Q}"; exit 1; }
+          }
+          fails() {
+            if next "$1" > /dev/null 2>&1; then echo "::error::$2 accepted"; exit 1; fi
+          }
+          commit first
+          check major 'version=v1.0.0 major=v1 previous='
+          fails preview 'invalid bump'
+          git tag v1.2.3; commit second
+          git tag v1.10.0-rc.1; git tag v2.0.0-rc.1; git tag v0-ruleset-probe; git tag v1
+          check patch 'version=v1.2.4 major=v1 previous=v1.2.3'
+          check minor 'version=v1.3.0 major=v1 previous=v1.2.3'
+          check major 'version=v2.0.0 major=v2 previous=v1.2.3'
+          git tag v1.10.0 HEAD~1
+          check patch 'version=v1.10.1 major=v1 previous=v1.10.0'
+          git tag v1.10.1; git tag -f v1 > /dev/null
+          fails patch 'already released HEAD'
+
+      - name: required-checks
+        run: |
+          script="$GITHUB_WORKSPACE/.github/actions/required-checks/required-checks.sh"
+          stub="$RUNNER_TEMP/gh-stub"; mkdir -p "$stub"
+          # Fake gh: rules/branches -> $RULES, check-runs -> $RUNS (--jq applied like gh does).
+          cat > "$stub/gh" <<'STUB'
+          #!/usr/bin/env bash
+          path="" filter="."
+          while [ $# -gt 0 ]; do
+            case "$1" in --jq) filter="$2"; shift 2 ;; api|--paginate) shift ;; *) path="$1"; shift ;; esac
+          done
+          case "$path" in
+            */rules/branches/*) jq -c "$filter" <<< "$RULES" ;;
+            */check-runs*) jq -c "$filter" <<< "$RUNS" ;;
+            *) exit 1 ;;
+          esac
+          STUB
+          chmod +x "$stub/gh"
+          rules='[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build","integration_id":15368},{"context":"lint","integration_id":15368}]}},{"type":"deletion"}]'
+          run() { jq -nc --argjson id "$1" --arg name "$2" --arg status "$3" --arg conclusion "$4" --argjson app "${5:-15368}" \
+            '{id:$id,name:$name,status:$status,conclusion:(if $conclusion == "" then null else $conclusion end),app:{id:$app}}'; }
+          gate() { RULES="$1" RUNS="{\"check_runs\":[$2]}" PATH="$stub:$PATH" GH_TOKEN=x REPO=o/r BRANCH=master SHA=0123456789 "$script" >&2; }
+          passes() { gate "$rules" "$2" || { echo "::error::$1: rejected"; exit 1; }; }
+          fails() { if gate "${3:-$rules}" "$2"; then echo "::error::$1: accepted"; exit 1; fi; }
+          passes 'all success' "$(run 1 build completed success),$(run 2 lint completed success)"
+          passes 'skipped and neutral' "$(run 1 build completed skipped),$(run 2 lint completed neutral)"
+          passes 'latest re-run wins' "$(run 1 build completed failure),$(run 3 build completed success),$(run 2 lint completed success)"
+          fails 'missing check' "$(run 1 build completed success)"
+          fails 'in progress' "$(run 1 build in_progress ''),$(run 2 lint completed success)"
+          fails 'cancelled' "$(run 1 build completed cancelled),$(run 2 lint completed success)"
+          fails 'stale success' "$(run 3 build completed failure),$(run 1 build completed success),$(run 2 lint completed success)"
+          fails 'other app' "$(run 1 build completed success 999),$(run 2 lint completed success)"
+          fails 'no required checks' "$(run 1 build completed success)" '[{"type":"deletion"}]'
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-tailwind, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-tailwind, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale, fixture-release]
     permissions:
       contents: read
       pull-requests: read

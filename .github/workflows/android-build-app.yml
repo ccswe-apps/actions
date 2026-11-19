@@ -24,7 +24,7 @@ name: android-build-app
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/android-build-app.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/android-build-app.yml@v1
 #       with:
 #         app-module: my-app
 #         version-files: buildSrc/src/main/java/Versions.kt

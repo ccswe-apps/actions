@@ -1,7 +1,7 @@
 name: nanoframework-package-lock
 description: Fail unless every .nfproj in the solution has a packages.lock.json.
 
-#   - uses: ccswe-apps/actions/.github/actions/nanoframework-package-lock@master   # $/... inside this repo
+#   - uses: ccswe-apps/actions/.github/actions/nanoframework-package-lock@v1   # $/... inside this repo
 #     with:
 #       solution: My.sln
 

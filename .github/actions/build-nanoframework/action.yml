@@ -5,7 +5,7 @@ description: >-
 
 # Windows only (MSBuild.exe, NuGet CLI). Run setup-nanoframework first.
 #
-#   - uses: ccswe-apps/actions/.github/actions/build-nanoframework@master   # $/... inside this repo
+#   - uses: ccswe-apps/actions/.github/actions/build-nanoframework@v1   # $/... inside this repo
 #     with:
 #       solution: My.sln
 

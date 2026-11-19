@@ -17,7 +17,7 @@ name: gradle-dependency-submission
 #     contents: write           # the Dependency Submission API
 #   jobs:
 #     dependencies:
-#       uses: ccswe-apps/actions/.github/workflows/gradle-dependency-submission.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/gradle-dependency-submission.yml@v1
 #       secrets:
 #         PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}   # optional: private Maven feed
 #

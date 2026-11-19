@@ -1,0 +1,30 @@
+name: release
+
+# Cut a release of this repo: `gh workflow run release.yml -f bump=<patch|minor|major>`
+# (README "Releases").
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver bump (release-tag.yml header).
+        type: choice
+        options: [patch, minor, major]
+        required: true
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-tag.yml
+    with:
+      bump: ${{ inputs.bump }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

@@ -24,4 +24,5 @@ Public reusable workflows (`.github/workflows/`) and composite actions (`.github
 ## Validation
 
 - Locally: `actionlint` with the `test.yml` ignores, and `shellcheck .github/actions/*/*.sh`.
-- Callers use `@master`, so a merge reaches every caller on its next run. Before merging a workflow change, point a throwaway caller PR at the branch (`@<branch>`) and check `pipeline / build`. PR runs don't reach the publish/release jobs.
+- Callers use `@v1`, which moves only on a release. Before merging a workflow change, point a throwaway caller PR at the branch (`@<branch>`) and check `pipeline / build`. PR runs don't reach the publish/release jobs.
+- After every merge, release it: `gh workflow run release.yml -f bump=<patch|minor|major>` (semver rules in the `release-tag.yml` header). Never `[skip ci]` a merge here: the release gate needs the master push's checks.

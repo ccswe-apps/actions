@@ -15,7 +15,7 @@ name: move-major-tag
 #     contents: read
 #   jobs:
 #     move:
-#       uses: ccswe-apps/actions/.github/workflows/move-major-tag.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/move-major-tag.yml@v1
 #       with:
 #         target: ${{ inputs.target }}
 #         major: ${{ inputs.major }}

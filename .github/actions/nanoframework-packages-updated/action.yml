@@ -3,7 +3,7 @@ description: Fail unless `nuget update` leaves the tree unchanged (all packages 
 
 # Windows only; run setup-nanoframework first.
 #
-#   - uses: ccswe-apps/actions/.github/actions/nanoframework-packages-updated@master   # $/... inside this repo
+#   - uses: ccswe-apps/actions/.github/actions/nanoframework-packages-updated@v1   # $/... inside this repo
 #     with:
 #       solution: My.sln
 

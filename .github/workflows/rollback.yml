@@ -1,0 +1,31 @@
+name: rollback
+
+# Point a major tag at an earlier release: `gh workflow run rollback.yml -f target=v1.2.3 -f major=v1`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: The release tag the major tag points at.
+        required: true
+      major:
+        type: choice
+        options: [v1]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  move:
+    uses: ./.github/workflows/move-major-tag.yml
+    with:
+      target: ${{ inputs.target }}
+      major: ${{ inputs.major }}
+    secrets:
+      AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
+      AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
