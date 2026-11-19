@@ -8,6 +8,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:   # re-run master's checks for the release gate
 
 permissions:
   contents: read
