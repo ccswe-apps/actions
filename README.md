@@ -102,7 +102,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 
 ## Self-tests
 
-`test.yml` runs on PRs and master pushes, and its job ids are required checks:
+`test.yml` runs on PRs, master pushes and dispatch (`gh workflow run test.yml` re-runs master's checks for a release), and its job ids are required checks:
 - `actionlint`
 - `shellcheck` on the composite scripts
 - `fixture-gradle` (`gradle-build` against `test/fixtures/gradle`)
