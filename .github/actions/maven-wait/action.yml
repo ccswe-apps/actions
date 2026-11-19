@@ -4,7 +4,7 @@ description: Wait until a Maven repository serves every artifact at a version.
 # Used by android-build-library.yml before dispatching update-dependencies.
 #
 #   - id: wait
-#     uses: ccswe-apps/actions/.github/actions/maven-wait@master   # $/... inside this repo
+#     uses: ccswe-apps/actions/.github/actions/maven-wait@v1   # $/... inside this repo
 #     with:
 #       url: https://maven.pkg.github.com/<owner>/<repo>
 #       packages: '["com.example:core"]'                   # group:name

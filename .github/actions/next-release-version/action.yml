@@ -1,0 +1,43 @@
+name: next-release-version
+description: Next semver release tag from the repo's stable vX.Y.Z tags.
+
+# Used by release-tag.yml.
+#
+# Caller shape:
+#
+#   - uses: actions/checkout@<major>
+#     with:
+#       fetch-depth: 0            # tags must be present
+#   - id: next
+#     uses: $/.github/actions/next-release-version
+#     with:
+#       bump: patch               # patch | minor | major
+#
+# Contract: the base is the highest tag matching vX.Y.Z (prerelease tags and bare
+# majors like v1 don't count; no tags = v0.0.0). Fails when HEAD already carries a
+# vX.Y.Z tag.
+
+inputs:
+  bump:
+    description: patch, minor or major.
+    required: true
+
+outputs:
+  version:
+    description: The next tag (e.g. v1.2.3).
+    value: ${{ steps.next.outputs.version }}
+  major:
+    description: Its major tag (e.g. v1).
+    value: ${{ steps.next.outputs.major }}
+  previous:
+    description: The base tag, or empty when there is none.
+    value: ${{ steps.next.outputs.previous }}
+
+runs:
+  using: composite
+  steps:
+    - id: next
+      shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
+      run: '"$GITHUB_ACTION_PATH/next-release-version.sh"'

@@ -13,7 +13,7 @@ description: Publish a run's release-aab artifact to a Google Play track with wo
 #       contents: read
 #       id-token: write
 #     steps:
-#       - uses: ccswe-apps/actions/.github/actions/android-play-publish@master
+#       - uses: ccswe-apps/actions/.github/actions/android-play-publish@v1
 #         with:
 #           workload-identity-provider: ${{ vars.PLAY_WIF_PROVIDER }}
 #           service-account: ${{ vars.PLAY_SERVICE_ACCOUNT }}

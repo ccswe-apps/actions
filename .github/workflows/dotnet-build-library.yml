@@ -25,7 +25,7 @@ name: dotnet-build-library
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@v1
 #       with:
 #         discover-dependents: |       # accounts to scan (trusted only; the App is public)
 #           <owner>
@@ -40,7 +40,7 @@ name: dotnet-build-library
 #
 #   jobs:
 #     pipeline:
-#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-library.yml@v1
 #       with:
 #         nuget-org: true
 #         discover-dependents: |
@@ -61,7 +61,7 @@ name: dotnet-build-library
 #         indexed: ${{ steps.publish.outputs.indexed }}
 #       steps:
 #         - id: publish
-#           uses: ccswe-apps/actions/.github/actions/nuget-org-publish@master
+#           uses: ccswe-apps/actions/.github/actions/nuget-org-publish@v1
 #           with:
 #             user: <nuget.org profile name>
 #             packages: ${{ needs.pipeline.outputs.packages }}
@@ -73,7 +73,7 @@ name: dotnet-build-library
 #       if: ${{ !cancelled() && needs.pipeline.result == 'success' && needs.pipeline.outputs.owners != '' }}
 #       permissions:
 #         contents: read
-#       uses: ccswe-apps/actions/.github/workflows/dispatch-dependents.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/dispatch-dependents.yml@v1
 #       with:
 #         owners: ${{ needs.pipeline.outputs.owners }}
 #         updater: ccswe-apps/actions/.github/workflows/dotnet-update-dependencies.yml

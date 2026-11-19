@@ -17,7 +17,7 @@ description: Push a run's nuget-packages artifact to nuget.org with Trusted Publ
 #       indexed: ${{ steps.publish.outputs.indexed }}
 #     steps:
 #       - id: publish
-#         uses: ccswe-apps/actions/.github/actions/nuget-org-publish@master
+#         uses: ccswe-apps/actions/.github/actions/nuget-org-publish@v1
 #         with:
 #           user: <nuget.org profile name>
 #           packages: ${{ needs.pipeline.outputs.packages }}

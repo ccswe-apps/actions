@@ -1,7 +1,7 @@
 name: npm-build
 description: npm ci, then the format:check, lint, test (when present) and build scripts.
 
-#   - uses: ccswe-apps/actions/.github/actions/npm-build@master   # $/... inside this repo
+#   - uses: ccswe-apps/actions/.github/actions/npm-build@v1   # $/... inside this repo
 #     with:
 #       build-env: |                 # optional: exported for `npm run build`
 #         SITE=https://staging.example.com

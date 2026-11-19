@@ -23,7 +23,7 @@ name: dotnet-build-app
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-app.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-build-app.yml@v1
 #       with:
 #         publish-image: true
 #       secrets:

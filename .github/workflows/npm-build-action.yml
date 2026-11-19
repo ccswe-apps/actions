@@ -13,7 +13,7 @@ name: npm-build-action
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/npm-build-action.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/npm-build-action.yml@v1
 #       secrets:
 #         AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

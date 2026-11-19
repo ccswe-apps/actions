@@ -28,7 +28,7 @@ name: dotnet-release-app
 #     checks: write             # test report
 #   jobs:
 #     release:
-#       uses: ccswe-apps/actions/.github/workflows/dotnet-release-app.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/dotnet-release-app.yml@v1
 #       with:
 #         projects: src/My.App.Desktop/My.App.Desktop.csproj src/My.App.Console/My.App.Console.csproj
 

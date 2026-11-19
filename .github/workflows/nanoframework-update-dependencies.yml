@@ -18,7 +18,7 @@ name: nanoframework-update-dependencies
 #     contents: read
 #   jobs:
 #     update-dependencies:
-#       uses: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/nanoframework-update-dependencies.yml@v1
 #       with:
 #         solution: My.sln
 #       secrets:

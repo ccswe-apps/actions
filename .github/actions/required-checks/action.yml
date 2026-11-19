@@ -1,0 +1,25 @@
+name: required-checks
+description: Fail unless every required check of the default branch passed on a commit.
+
+# Used by release-tag.yml.
+#
+# Caller shape (the job needs `checks: read`):
+#
+#   - uses: $/.github/actions/required-checks
+#
+# Contract: reads the required_status_checks rules that apply to the default branch
+# (`rules/branches/<default>`). For each context, the latest check run on github.sha
+# with that name (and the rule's app, when set) must be completed with success,
+# skipped or neutral. Missing, running or other conclusions fail, as does a branch
+# with no required checks. Commit statuses aren't read.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.event.repository.default_branch }}
+        SHA: ${{ github.sha }}
+      run: '"$GITHUB_ACTION_PATH/required-checks.sh"'

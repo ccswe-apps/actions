@@ -4,7 +4,7 @@ description: Set up a JDK and Gradle, then run Gradle tasks with the wrapper.
 # Caller shape:
 #
 #   - uses: actions/checkout@<major>
-#   - uses: ccswe-apps/actions/.github/actions/gradle-build@master   # $/... inside this repo
+#   - uses: ccswe-apps/actions/.github/actions/gradle-build@v1   # $/... inside this repo
 #     env:
 #       PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}   # only if the build reads a private feed
 #     with:

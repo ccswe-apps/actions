@@ -4,7 +4,7 @@ description: Wait until a NuGet feed serves every package at a version.
 # Used by the library workflows before dispatching update-dependencies.
 #
 #   - id: wait
-#     uses: ccswe-apps/actions/.github/actions/nuget-wait@master   # $/... inside this repo
+#     uses: ccswe-apps/actions/.github/actions/nuget-wait@v1   # $/... inside this repo
 #     with:
 #       source: https://api.nuget.org/v3/index.json   # the feed's service index
 #       packages: '["My.Package"]'

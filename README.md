@@ -21,7 +21,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
 | `npm-build-app.yml` | `build` (npm ci, format:check, lint, test, build with build env) · `dependabot` |
 | `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
-| `npm-release-action.yml` | on a version tag: `verify` (tag on the default branch, `npm-build` with the `dist/` check) → `publish` (GitHub Release) → `major` (move the major tag) |
+| `release-tag.yml` | on dispatch: `verify` (default branch, every required check passed on the commit, next version) → `release` (tag and GitHub Release) → `major` (move the major tag); see [Releases](#releases) |
 | `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
 | `dispatch-dependents.yml` | nested in the GitHub Packages library workflows, a caller job for nuget.org libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
 | `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
@@ -32,7 +32,19 @@ Callers:
 - Keep the calling job id `pipeline`. The required check is `pipeline / build`.
 - Set `permissions:` and `concurrency:` in the caller workflow. A called workflow can only lower permissions, and it sees the caller's `github.workflow`.
 - Pass secrets by name. `secrets: inherit` doesn't cross orgs.
-- Reference `@master`: there are no release tags, so stage a breaking change by pointing one caller at `@<branch>` first.
+- Reference the major tag (`@v1`). It moves only when a release is cut ([Releases](#releases)).
+
+## Releases
+
+This repo and callers using `release-tag.yml` release by dispatch from the default branch:
+
+```bash
+gh workflow run release.yml -f bump=<patch|minor|major>
+```
+
+The run tags the next `vX.Y.Z` (from the highest existing one), creates the GitHub Release with generated notes and moves the major tag. The semver rules are in the `release-tag.yml` header. `rollback.yml` points the major tag at an earlier release (`-f target=v1.2.3 -f major=v1`). `v*` tags are created and moved only by andy-the-messenger-robot and org admins (repo-standards `rulesets/release-tags.json`).
+
+After a new major, callers move by hand. Their Dependabot `github-actions` entries also open a PR to the new major in the `actions-major` group; it closes once the reference is updated.
 
 ## Dependents
 
@@ -86,6 +98,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check.
 - `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact. On GitHub-hosted Linux runners it removes preinstalled toolchains Gradle builds don't use (.NET, GHC, Swift, CodeQL), and before the build it removes restored caches and distributions of other Gradle versions. `cache-read-only: true` forces a read-only Gradle cache; otherwise setup-gradle's default applies (read-only off the default branch). `android-build-app` and `android-build-library` release builds don't save the cache; non-release default-branch pushes refresh it.
 - `version-changed`: whether any watched file changed in the pushed range.
+- `next-release-version`, `required-checks`: the next `vX.Y.Z` tag, and the gate that every required check passed on a commit (`release-tag.yml`).
 
 ## Self-tests
 
@@ -100,6 +113,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
 - `fixture-android-play` (`android-play-publish --dry-run` on a generated phone and Wear tree)
 - `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`)
+- `fixture-release` (`next-release-version` against a generated repo, `required-checks` against a stubbed `gh`)
 
 Inside this repo, workflows reference the composites with `$/` (`uses: $/.github/actions/gradle-build`). That resolves to this repo at the running commit, even when the workflow is called from another owner.
 

@@ -7,7 +7,7 @@ Blocked: actionlint 1.7.12, the latest release, still has the old input metadata
 ## Steps
 
 1. Wait for an actionlint release that knows `client-id` (check `gh release list -R rhysd/actionlint`); update the pinned actionlint here and in `~/.claude/TOOLS.md`.
-2. Replace `app-id:` with `client-id:` in every workflow and composite that mints the andy token, and switch the secret from `AUTOMATION_APP_ID` to the App's client ID (add a new secret; check the owner orgs' Actions and Dependabot secrets and the callers that pass it).
+2. In every workflow and composite that mints the andy token, add an optional `AUTOMATION_APP_CLIENT_ID` secret (the App's client ID) and pass `client-id:` when it's set, else `app-id:`. That's a minor release. Add the org secrets (Actions and Dependabot) and switch callers to pass it; removing `AUTOMATION_APP_ID` is a breaking change for the next major.
 3. Validate with actionlint (ignore patterns in `.github/workflows/test.yml`) and a throwaway caller PR at `@<branch>`.
 
 Delete this file when done.

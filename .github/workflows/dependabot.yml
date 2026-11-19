@@ -10,7 +10,7 @@ name: dependabot
 #     permissions:              # caller's ceiling must allow these
 #       contents: read
 #       pull-requests: read
-#     uses: ccswe-apps/actions/.github/workflows/dependabot.yml@master   # $/... inside this repo
+#     uses: ccswe-apps/actions/.github/workflows/dependabot.yml@v1   # $/... inside this repo
 #     secrets:
 #       AUTOMATION_APP_ID: ${{ secrets.AUTOMATION_APP_ID }}
 #       AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}

@@ -12,7 +12,7 @@ name: npm-build-app
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/npm-build-app.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/npm-build-app.yml@v1
 #       with:
 #         build-env: |
 #           SITE=https://staging.example.com

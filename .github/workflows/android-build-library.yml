@@ -23,7 +23,7 @@ name: android-build-library
 #     pull-requests: read
 #   jobs:
 #     pipeline:                 # keep the id: the required check is `pipeline / build`
-#       uses: ccswe-apps/actions/.github/workflows/android-build-library.yml@master
+#       uses: ccswe-apps/actions/.github/workflows/android-build-library.yml@v1
 #       with:
 #         tasks: assembleRelease test lintRelease
 #         version-files: buildSrc/src/main/kotlin/Versions.kt
