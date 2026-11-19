@@ -68,7 +68,8 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 
 ## Composite actions
 
-- `dotnet-build`: SDK (`dotnet-sdk-version`), nbgv version, restore, build, then the test projects matching `test-patterns`, with a test report and TRX artifact.
+- `dotnet-build`: SDK (`dotnet-sdk-version`), nbgv version, restore, build, then the test projects matching `test-patterns` (excluding tests tagged `[Category("LocalOnly")]`, for those that need an internal network or external sites; VSTest runner), with a test report and TRX artifact. `dotnet-build-app` runs `*.UnitTests.csproj` and `*.IntegrationTests.csproj` (Docker is available for Testcontainers).
+- `setup-tailwind`: the Tailwind CSS standalone CLI pinned by the root Dockerfile's `ARG TAILWIND_VERSION=<version>` (release checksum and version verified), on PATH for later steps; skipped without a Dockerfile or a pinned version. `dotnet-build-app` runs it before the build, so CSS compiled during `dotnet build` (CCSWE.Blazor's `TailwindBuild`) matches the image.
 - `dotnet-sdk-version`: the `actions/setup-dotnet` version, first match wins: an explicit `dotnet-version` (passed through), the repo-root `global.json` (`sdk.version` and `rollForward`; see the header), else `10.0.x`. A `global.json` below the root is ignored (`dotnet` runs from the root and never sees it); a malformed one fails. The .NET workflows use it, so a repo changes SDK by editing its root `global.json`.
 - `dotnet-pack`: packs every `IsPackable` project at the given version and checks each package exists.
 - `discover-dependents`: an account's repos whose `update-dependencies` listener calls a given updater workflow, optionally limited to an opt-in list.
@@ -94,6 +95,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `fixture-gradle` (`gradle-build` against `test/fixtures/gradle`)
 - `fixture-dotnet-{pass,fail,no-tests,library,update}` (the .NET composites against `test/fixtures/dotnet`)
 - `fixture-dotnet-sdk-version` (`dotnet-sdk-version` against generated `global.json` files)
+- `fixture-tailwind` (`setup-tailwind` against generated Dockerfiles)
 - `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`, `dependents-plan`, and `dependents-opt-in` parsing)
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
 - `fixture-android-play` (`android-play-publish --dry-run` on a generated phone and Wear tree)

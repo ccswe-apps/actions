@@ -1,0 +1,21 @@
+name: setup-tailwind
+description: Install the Tailwind CSS CLI version pinned by the Dockerfile's ARG TAILWIND_VERSION, or skip.
+
+# For app builds whose CSS is compiled by the standalone Tailwind CLI during `dotnet build`
+# (e.g. CCSWE.Blazor's TailwindBuild target), so CI builds what the image builds. Reads the first
+# `ARG TAILWIND_VERSION=<version>` in `<root>/Dockerfile`; no Dockerfile or no pinned version skips.
+# Verifies the release's sha256sums.txt and the CLI's version, then adds it to PATH for later steps.
+
+inputs:
+  root:
+    description: Directory holding the Dockerfile.
+    required: false
+    default: ${{ github.workspace }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+      run: bash "$GITHUB_ACTION_PATH/setup-tailwind.sh"

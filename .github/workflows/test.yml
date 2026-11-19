@@ -175,6 +175,9 @@ jobs:
           [ "$PACKAGES" = '["Fixture.Library"]' ] || { echo "::error::unexpected packages: $PACKAGES"; exit 1; }
           [ -f "$DIRECTORY/Fixture.Library.$PACKAGE_VERSION.nupkg" ] || { echo "::error::package missing"; exit 1; }
           [ -f "$DIRECTORY/Fixture.Library.$PACKAGE_VERSION.snupkg" ] || { echo "::error::symbol package missing"; exit 1; }
+          # The LocalOnly test is filtered out: only Runs executes.
+          grep -q '<Counters total="1" executed="1" passed="1" failed="0"' "$RUNNER_TEMP/TestResults/Library.UnitTests.trx" ||
+            { echo "::error::LocalOnly filter: unexpected counters"; grep -o '<Counters[^>]*>' "$RUNNER_TEMP/TestResults/Library.UnitTests.trx"; exit 1; }
 
   fixture-dotnet-update:
     runs-on: ubuntu-latest
@@ -587,8 +590,63 @@ jobs:
             if resolve '' > /dev/null; then echo "::error::accepted ${bad@Q}"; exit 1; fi
           done
 
+  fixture-tailwind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Generated Dockerfiles (CRLF, quotes and indentation survive no checkout normalization).
+      - name: Arrange
+        run: |
+          mk() { mkdir -p "$RUNNER_TEMP/tw/$1"; printf '%b' "$2" > "$RUNNER_TEMP/tw/$1/Dockerfile"; }
+          mk lf 'ARG DOTNET_VERSION=11.0\nARG TAILWIND_VERSION=v4.3.3\nFROM scratch\nARG TAILWIND_VERSION\n'
+          mk crlf 'ARG TAILWIND_VERSION=v4.3.3\r\nFROM scratch\r\n'
+          mk quoted '  ARG TAILWIND_VERSION="4.3.3"\n'
+          mk none 'ARG DOTNET_VERSION=11.0\nFROM scratch\n'
+          mk invalid 'ARG TAILWIND_VERSION=latest\n'
+          mkdir -p "$RUNNER_TEMP/tw/nodockerfile"
+
+      - id: lf
+        uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/lf
+
+      - name: Assert installed
+        run: |
+          banner="$(tailwindcss --help 2>&1 || true)"
+          [[ "${banner%%$'\n'*}" == *"tailwindcss v4.3.3"* ]] || { echo "::error::tailwindcss not on PATH: $banner"; exit 1; }
+
+      - uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/crlf
+
+      - uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/quoted
+
+      - uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/none
+
+      - uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/nodockerfile
+
+      - id: invalid
+        continue-on-error: true
+        uses: $/.github/actions/setup-tailwind
+        with:
+          root: ${{ runner.temp }}/tw/invalid
+
+      - name: Assert invalid failed
+        env:
+          OUTCOME: ${{ steps.invalid.outcome }}
+        run: |
+          [ "$OUTCOME" = failure ] || { echo "::error::invalid ARG TAILWIND_VERSION accepted"; exit 1; }
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-tailwind, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale]
     permissions:
       contents: read
       pull-requests: read
