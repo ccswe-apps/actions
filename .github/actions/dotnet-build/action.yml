@@ -19,8 +19,9 @@ description: Version with nbgv, then restore, build and test a .NET solution.
 #
 # Contract: `path` holds one solution (or is the directory `dotnet restore`
 # resolves). Test projects are the tracked files under `path` matching any of
-# `test-patterns`; none matching warns and skips tests. A test failure fails the
-# action after every project has run.
+# `test-patterns`; none matching warns and skips tests. Tests tagged
+# [Category("LocalOnly")] are excluded (`--filter TestCategory!=LocalOnly`; assumes the VSTest
+# runner). A test failure fails the action after every project has run.
 
 inputs:
   path:

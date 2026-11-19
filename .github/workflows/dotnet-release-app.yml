@@ -3,7 +3,7 @@ name: dotnet-release-app
 # Reusable workflow for .NET desktop/CLI apps released as GitHub Release assets
 # on a version tag.
 #
-#   release     dotnet-build on `path` (tests and nbgv version), `dotnet publish` of each
+#   release     dotnet-build on `path` (unit tests without LocalOnly, and nbgv version), `dotnet publish` of each
 #               project for each runtime (framework-dependent, or self-contained with
 #               `self-contained: true`) merged into one folder per runtime, packed as
 #               <asset-name>-<rid>.zip (win-*) or .tar.gz with SHA256SUMS.txt, then a

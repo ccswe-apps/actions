@@ -2,7 +2,8 @@ name: dotnet-build-app
 
 # Reusable workflow for .NET app repos.
 #
-#   build       dotnet-build on `path` (nbgv, restore, build, *.UnitTests.csproj);
+#   build       Tailwind CLI (setup-tailwind) and dotnet-build on `path` (nbgv, restore, build,
+#               *.UnitTests.csproj and *.IntegrationTests.csproj, without LocalOnly tests);
 #               skipped in template repos and on a derived repo's "Initial commit" push
 #   publish     only with publish-image on a default-branch push: docker build + push to
 #               ghcr.io/<owner>/<image-name> (version and latest tags), then prunes to the
@@ -31,9 +32,11 @@ name: dotnet-build-app
 #         AUTOMATION_APP_KEY: ${{ secrets.AUTOMATION_APP_KEY }}
 #
 # App-repo contract: `path` holds one solution (.slnx/.sln) that includes the
-# *.UnitTests.csproj projects (*.IntegrationTests.csproj are not run). With
-# publish-image, a multi-stage Dockerfile at the repo root restores using the
-# NUGET_AUTH_TOKEN build-arg in its build stage only.
+# *.UnitTests.csproj and *.IntegrationTests.csproj projects; both run on the runner (Docker
+# available for Testcontainers), except tests tagged [Category("LocalOnly")] (internal network,
+# external sites). With publish-image, a multi-stage Dockerfile at the repo root restores using the
+# NUGET_AUTH_TOKEN build-arg in its build stage only. A root Dockerfile that pins
+# `ARG TAILWIND_VERSION=<version>` also gets that Tailwind CLI on PATH for the build.
 # SDK: `dotnet-version` if set, else the repo-root global.json (dotnet-sdk-version), else 10.0.x.
 
 on:
@@ -93,11 +96,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Pinned by the Dockerfile's ARG TAILWIND_VERSION; skipped without one.
+      - uses: $/.github/actions/setup-tailwind
+
       # Builds as a test gate; the shipped binary is rebuilt and stamped in Docker.
       - id: build
         uses: $/.github/actions/dotnet-build
         with:
           path: ${{ inputs.path }}
+          test-patterns: '*.UnitTests.csproj *.IntegrationTests.csproj'
           nuget-auth-token: ${{ secrets.PACKAGES_PAT }}
           dotnet-version: ${{ inputs.dotnet-version }}
 
