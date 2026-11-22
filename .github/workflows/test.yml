@@ -492,6 +492,9 @@ jobs:
   fixture-npm-action-stale:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read  # download-artifact looks the artifact up through the API
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -504,11 +507,18 @@ jobs:
           working-directory: test/fixtures/npm/action
           committed-output: dist
 
+      # The failure uploads the expected dist/ for contributors who can't get a rebuild pushed.
+      - uses: actions/download-artifact@v8
+        with:
+          name: committed-output
+          path: ${{ runner.temp }}/committed-output
+
       - name: Assert
         env:
           OUTCOME: ${{ steps.build.outcome }}
         run: |
           [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
+          grep -q changed "$RUNNER_TEMP/committed-output/index.js" || { echo "::error::artifact lacks the rebuilt dist"; exit 1; }
 
   # android-play-publish --dry-run: phone and Wear tracks, a missing mapping warns, bad trees fail.
   fixture-android-play:

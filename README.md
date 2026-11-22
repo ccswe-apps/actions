@@ -20,7 +20,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `nanoframework-build-library.yml` | `build` (Windows, nuspec pack; outputs `publish` when packable files changed) · `package-lock` · `packages-updated` (PRs) · `dependabot`. The caller adds `publish` (`nuget-org-publish`) and `dependents` (`dispatch-dependents.yml`) jobs; see the header |
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
 | `npm-build-app.yml` | `build` (npm ci, format:check, lint, test, build with build env) · `dependabot` |
-| `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build) · `dependabot` |
+| `npm-build-action.yml` | `build` (the same, then fails unless the committed `dist/` matches the build, uploading the expected `dist/` as artifact `committed-output`) · `dependabot` |
 | `release-tag.yml` | on dispatch: `verify` (default branch, every required check passed on the commit, next version) → `release` (tag and GitHub Release) → `major` (move the major tag); see [Releases](#releases) |
 | `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
 | `dispatch-dependents.yml` | nested in the GitHub Packages library workflows, a caller job for nuget.org libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
@@ -95,7 +95,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `nuget-wait`: waits until a feed's flat container (exact restore) or registration index ("latest") lists every package version.
 - `maven-wait`: waits until a Maven repository's `maven-metadata.xml` lists the version for every artifact.
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
-- `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check.
+- `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check (on failure: rebuild and download commands in the error and step summary, and the built output uploaded as an artifact, so fork contributors can commit it).
 - `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact. On GitHub-hosted Linux runners it removes preinstalled toolchains Gradle builds don't use (.NET, GHC, Swift, CodeQL), and before the build it removes restored caches and distributions of other Gradle versions. `cache-read-only: true` forces a read-only Gradle cache; otherwise setup-gradle's default applies (read-only off the default branch). `android-build-app` and `android-build-library` release builds don't save the cache; non-release default-branch pushes refresh it.
 - `version-changed`: whether any watched file changed in the pushed range.
 - `next-release-version`, `required-checks`: the next `vX.Y.Z` tag, and the gate that every required check passed on a commit (`release-tag.yml`).
@@ -112,7 +112,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `fixture-discover` (`discover-dependents --local` against `test/fixtures/listeners`, `dependents-plan`, and `dependents-opt-in` parsing)
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
 - `fixture-android-play` (`android-play-publish --dry-run` on a generated phone and Wear tree)
-- `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`)
+- `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`; the stale one also checks the uploaded artifact)
 - `fixture-release` (`next-release-version` against a generated repo, `required-checks` against a stubbed `gh`)
 
 Inside this repo, workflows reference the composites with `$/` (`uses: $/.github/actions/gradle-build`). That resolves to this repo at the running commit, even when the workflow is called from another owner.
