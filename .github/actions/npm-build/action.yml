@@ -5,7 +5,8 @@ description: npm ci, then the format:check, lint, test (when present) and build 
 #     with:
 #       build-env: |                 # optional: exported for `npm run build`
 #         SITE=https://staging.example.com
-#       committed-output: dist       # optional: fail unless the build leaves this path unchanged
+#       committed-output: dist       # optional: fail unless the build leaves this path unchanged;
+#                                    # when it doesn't, upload the built path as artifact `artifact-name`
 #
 # Package contract: scripts `format:check`, `lint` and `build`; `test` is optional.
 
@@ -22,6 +23,9 @@ inputs:
   committed-output:
     description: Committed build output path, relative to working-directory; empty skips the check.
     default: ''
+  artifact-name:
+    description: Artifact holding the expected committed output when the check fails.
+    default: committed-output
 
 runs:
   using: composite
@@ -32,9 +36,22 @@ runs:
         cache: npm
         cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
 
-    - shell: bash
+    - id: build
+      shell: bash
       env:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         BUILD_ENV: ${{ inputs.build-env }}
         COMMITTED_OUTPUT: ${{ inputs.committed-output }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
       run: '"$GITHUB_ACTION_PATH/npm-build.sh"'
+
+    # Fork PRs can't get a rebuild pushed to them; the contributor downloads this and commits it.
+    - if: failure() && steps.build.outputs.stale == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/${{ inputs.committed-output }}
+        include-hidden-files: true
+        overwrite: true
+        retention-days: 7
