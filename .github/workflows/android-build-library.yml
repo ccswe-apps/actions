@@ -178,7 +178,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-  # Runs on every build (PRs log the discovered set); sends only once the repository serves the publish.
+  # Runs on every build (same-repo PRs log the discovered set); sends only once the repository serves the publish.
   dependents:
     needs: build
     if: >-

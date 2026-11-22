@@ -51,7 +51,7 @@ name: nanoframework-build-library
 #             version: ${{ needs.pipeline.outputs.version }}
 #             index: registration
 #
-#     # Runs on every build (PRs log the discovered set); sends only once nuget.org serves the publish.
+#     # Runs on every build (same-repo PRs log the discovered set); sends only once nuget.org serves the publish.
 #     dependents:
 #       needs: [pipeline, publish]
 #       if: ${{ !cancelled() && needs.pipeline.result == 'success' && needs.pipeline.outputs.owners != '' }}

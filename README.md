@@ -68,7 +68,7 @@ Update-Dependents: videobrowser-web
 
 When it's read:
 - **Push to the default branch:** the current body of the merged PR for the pushed commit. These dependents get the dispatch after the publish.
-- **`pull_request`:** the PR body in the event (with the default `pull_request` types, editing the body alone doesn't start a run; push a commit). This is a preview: the dependents job logs each discovered listener as kept or `(not opted in)`, and never sends.
+- **`pull_request`:** the PR body in the event (with the default `pull_request` types, editing the body alone doesn't start a run; push a commit). This is a preview: the dependents job logs each discovered listener as kept or `(not opted in)`, and never sends. Fork PRs get no secrets, so they skip discovery and log only the explicit repos.
 
 With no line (or no merged PR, e.g. a direct push), nothing is dispatched and the push skips the dependents job. Dependents pick the version up from their Dependabot schedule (weekly with the `repo-standards` templates) or a manual PR.
 
