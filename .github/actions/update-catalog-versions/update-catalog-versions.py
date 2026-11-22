@@ -21,6 +21,21 @@ def fail(message):
     sys.exit(1)
 
 
+def downgrade(current, target):
+    """True when both are SemVer and target precedes current (core numerically, then a prerelease before its
+    release, then prerelease identifiers); anything else (ranges, wildcards, properties) is not compared."""
+    if not SEMVER.match(current) or not SEMVER.match(target):
+        return False
+
+    def key(version):
+        core, _, pre = version.split("+", 1)[0].partition("-")
+        ids = [(0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")] if pre else []
+        return [int(n) for n in core.split(".")], (1,) if not pre else (0, ids)
+
+    (c_core, c_pre), (t_core, t_pre) = key(current), key(target)
+    return (t_core, t_pre) < (c_core, c_pre)
+
+
 def breaking(old, new):
     """A major change, or a minor change while the major is 0; unparsable counts too."""
     o, n = re.match(r"^(\d+)\.(\d+)", old), re.match(r"^(\d+)\.(\d+)", new)
@@ -84,6 +99,9 @@ def main():
             continue
         if current == version:
             continue
+        if downgrade(current, version):
+            print(f"::notice::{alias} ({module}) is {current}, newer than {version}; not downgraded")
+            continue
         i = key_line(lines, "libraries", alias)
         pattern = (re.compile(r"(\bversion\s*=\s*\")([^\"]*)(\")") if isinstance(entry, dict)
                    else re.compile(r"(\"" + re.escape(module) + r":)([^\"]*)(\")"))
@@ -102,6 +120,9 @@ def main():
             print(f"::warning::[versions] {key} is not a plain version; not updated")
             continue
         if current == version:
+            continue
+        if downgrade(current, version):
+            print(f"::notice::[versions] {key} is {current}, newer than {version}; not downgraded")
             continue
         lines[i] = pattern.sub(lambda m: m.group(1) + version + m.group(3), lines[i], count=1)
         bumps.extend(f"Bumps {module} from {current} to {version}" for module in modules)

@@ -1,7 +1,8 @@
 name: dependabot
 
 # Reusable workflow: merges non-major Dependabot PRs once required checks pass,
-# and updates auto-merge bot PRs left behind base by a merge.
+# updates auto-merge bot PRs left behind base by a merge, and re-dispatches the oldest
+# conflicting bot update PR (recover-update-prs) so a fresh one replaces it.
 #
 # Caller shape (in a CI workflow that runs on push and pull_request):
 #
@@ -83,3 +84,9 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      # A merge can also leave a bot update PR conflicting (two library updates editing adjacent lines);
+      # re-dispatch its update so the updater opens a fresh PR from base and supersedes it.
+      - uses: $/.github/actions/recover-update-prs
+        with:
+          token: ${{ steps.app-token.outputs.token }}

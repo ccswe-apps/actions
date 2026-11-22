@@ -1,0 +1,30 @@
+name: recover-update-prs
+description: Re-dispatch the oldest conflicting bot update PR so the updater opens a fresh one from the default branch.
+
+# Used by dependabot.yml's update-behind job (from this repo: `uses: $/.github/actions/recover-update-prs`).
+# Two library updates landing close together edit adjacent lines; after the first merges, the second
+# conflicts and auto-merge stalls. For the oldest conflicting andy-the-messenger-robot update PR with
+# auto-merge on:
+#   bot/update-dependencies/*    comment (marks it recovered), then send update-dependencies with the
+#                                PR's payload (body marker, else title/branch/body); the updater's
+#                                supersede step closes the old PR
+#   nfbot/update-dependencies/*  close it, then send update-dependencies (nanodu ignores the payload)
+# One per run: the updaters' concurrency group keeps a single pending run, so several dispatches in a
+# row would cancel each other. The recovered PR's merge pushes the default branch, which runs this again.
+# GH_TOKEN needs contents: write (dispatch) and pull-requests: write.
+
+inputs:
+  token:
+    description: Token for the repository (andy-the-messenger-robot installation token).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        OWNER: ${{ github.repository_owner }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: '"$GITHUB_ACTION_PATH/recover-update-prs.sh"'

@@ -22,6 +22,21 @@ def fail(message):
     sys.exit(1)
 
 
+def downgrade(current, target):
+    """True when both are SemVer and target precedes current (core numerically, then a prerelease before its
+    release, then prerelease identifiers); anything else (ranges, wildcards, properties) is not compared."""
+    if not SEMVER.match(current) or not SEMVER.match(target):
+        return False
+
+    def key(version):
+        core, _, pre = version.split("+", 1)[0].partition("-")
+        ids = [(0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")] if pre else []
+        return [int(n) for n in core.split(".")], (1,) if not pre else (0, ids)
+
+    (c_core, c_pre), (t_core, t_pre) = key(current), key(target)
+    return (t_core, t_pre) < (c_core, c_pre)
+
+
 def major(version):
     m = re.match(r"^(\d+)\.", version)
     return int(m.group(1)) if m else None
@@ -53,6 +68,9 @@ def main():
             tag = item.group(0)
             include, current = INCLUDE.search(tag), VERSION.search(tag)
             if not include or not current or include.group(1).lower() not in wanted or current.group(2) == version:
+                return tag
+            if downgrade(current.group(2), version):
+                print(f"::notice::{include.group(1)} is {current.group(2)}, newer than {version}; not downgraded")
                 return tag
             old = current.group(2)
             if major(old) != major(version):
