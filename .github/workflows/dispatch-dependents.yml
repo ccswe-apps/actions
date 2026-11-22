@@ -11,9 +11,10 @@ name: dispatch-dependents
 #               `update-dependencies` and calls `updater` and that `only` names; with send,
 #               a contents-write token for just those repos sends the dispatch
 #
-# Runs on every build, so PR logs show the set (only listeners are printed, kept or not opted
-# in). `only` filters discovered listeners, not the explicit repos. andy is a public
-# App: only accounts the caller lists are scanned, never its installations.
+# Runs on every build, so same-repo PR logs show the set (only listeners are printed, kept or
+# not opted in). Fork PRs get no secrets, so they skip discovery. `only` filters discovered
+# listeners, not the explicit repos. andy is a public App: only accounts the caller lists are
+# scanned, never its installations.
 
 on:
   workflow_call:
@@ -55,13 +56,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    env:
+      # Fork PRs run without secrets, so the andy token can't be minted.
+      SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     strategy:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(inputs.owners) }}
     steps:
+      - name: Skip discovery (fork PR)
+        if: matrix.target.discover && env.SAME_REPO != 'true'
+        run: echo "::notice::Dependent discovery skipped, secrets aren't available to fork PRs."
+
       - id: read-token
-        if: matrix.target.discover
+        if: matrix.target.discover && env.SAME_REPO == 'true'
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.AUTOMATION_APP_ID }}
@@ -70,7 +78,7 @@ jobs:
           permission-contents: read
 
       - id: discover
-        if: matrix.target.discover
+        if: matrix.target.discover && env.SAME_REPO == 'true'
         uses: $/.github/actions/discover-dependents
         with:
           owner: ${{ matrix.target.owner }}
