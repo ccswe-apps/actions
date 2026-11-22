@@ -493,7 +493,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: read  # download-artifact looks the artifact up through the API
+      actions: read  # gh run download
       contents: read
     steps:
       - uses: actions/checkout@v7
@@ -508,17 +508,19 @@ jobs:
           committed-output: dist
 
       # The failure uploads the expected dist/ for contributors who can't get a rebuild pushed.
-      - uses: actions/download-artifact@v8
-        with:
-          name: committed-output
-          path: ${{ runner.temp }}/committed-output
-
+      # Fetch it the way the error message tells them to; the listing can lag the upload briefly.
       - name: Assert
         env:
           OUTCOME: ${{ steps.build.outcome }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           [ "$OUTCOME" = failure ] || { echo "::error::expected failure, got $OUTCOME"; exit 1; }
-          grep -q changed "$RUNNER_TEMP/committed-output/index.js" || { echo "::error::artifact lacks the rebuilt dist"; exit 1; }
+          dir="$RUNNER_TEMP/committed-output"
+          for _ in 1 2 3 4 5 6; do
+            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n committed-output -D "$dir" && break
+            sleep 5
+          done
+          grep -q changed "$dir/index.js" || { echo "::error::artifact lacks the rebuilt dist"; exit 1; }
 
   # android-play-publish --dry-run: phone and Wear tracks, a missing mapping warns, bad trees fail.
   fixture-android-play:
