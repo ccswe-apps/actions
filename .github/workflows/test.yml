@@ -186,23 +186,37 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - id: minor
+      - id: major
         uses: $/.github/actions/update-package-versions
         with:
-          packages: nunit Microsoft.NET.Test.Sdk
-          version: 5.0.1
+          packages: nunit3testadapter
+          version: 7.0.0
 
-      - name: Assert minor
+      - name: Assert major
         env:
-          CHANGED: ${{ steps.minor.outputs.changed }}
-          MAJOR: ${{ steps.minor.outputs.major }}
+          CHANGED: ${{ steps.major.outputs.changed }}
+          MAJOR: ${{ steps.major.outputs.major }}
         run: |
           if [ "$CHANGED" != true ] || [ "$MAJOR" != true ]; then
-            echo "::error::changed=$CHANGED major=$MAJOR (Test.Sdk 18 -> 5 is a major change)"
+            echo "::error::changed=$CHANGED major=$MAJOR (NUnit3TestAdapter 6 -> 7 is a major change)"
             exit 1
           fi
-          grep -q '<PackageVersion Include="NUnit" Version="5.0.1" />' test/fixtures/dotnet/Directory.Packages.props
+          grep -q '<PackageVersion Include="NUnit3TestAdapter" Version="7.0.0" />' test/fixtures/dotnet/Directory.Packages.props
           git checkout -- .
+
+      # A lower version (e.g. a re-dispatched older update) leaves the file alone.
+      - id: downgrade
+        uses: $/.github/actions/update-package-versions
+        with:
+          packages: Microsoft.NET.Test.Sdk
+          version: 5.0.1
+
+      - name: Assert downgrade
+        env:
+          CHANGED: ${{ steps.downgrade.outputs.changed }}
+        run: |
+          [ "$CHANGED" = false ] || { echo "::error::changed=$CHANGED (18.12.0 -> 5.0.1 is a downgrade)"; exit 1; }
+          git diff --exit-code
 
       - id: patch
         uses: $/.github/actions/update-package-versions
@@ -389,6 +403,21 @@ jobs:
           fi
           grep -qx 'ccswe = "0.7.1"' "$CATALOG"
           git checkout -- .
+
+      # Lower versions (e.g. a re-dispatched older update) leave the catalog alone: version.ref and inline.
+      - id: downgrade
+        uses: $/.github/actions/update-catalog-versions
+        with:
+          packages: com.ccswe.android:core com.example:inline
+          version: 0.6.0
+          catalog: test/fixtures/catalog/libs.versions.toml
+
+      - name: Assert downgrade
+        env:
+          CHANGED: ${{ steps.downgrade.outputs.changed }}
+        run: |
+          [ "$CHANGED" = false ] || { echo "::error::changed=$CHANGED"; exit 1; }
+          git diff --exit-code
 
       # version = { ref = ... }, a 1.x minor (not breaking), and a trailing comment.
       - id: stable
@@ -732,8 +761,84 @@ jobs:
           fails 'other app' "$(run 1 build completed success 999),$(run 2 lint completed success)"
           fails 'no required checks' "$(run 1 build completed success)" '[{"type":"deletion"}]'
 
+  # recover-update-prs against a stubbed gh: which bot update PRs it re-dispatches, and with what payload.
+  fixture-recover-update-prs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: recover-update-prs
+        run: |
+          script="$GITHUB_WORKSPACE/.github/actions/recover-update-prs/recover-update-prs.sh"
+          stub="$RUNNER_TEMP/gh-stub"; mkdir -p "$stub"
+          export PRS="$RUNNER_TEMP/prs.json" VIEW="$RUNNER_TEMP/view.json" LOG="$RUNNER_TEMP/actions.log" SENT="$RUNNER_TEMP/dispatches.jsonl"
+          # Fake gh: pr list -> $PRS, pr view -> $VIEW, pr comment/close -> $LOG, api --input - -> $SENT.
+          cat > "$stub/gh" <<'STUB'
+          #!/usr/bin/env bash
+          case "$1 $2" in
+            "pr list") cat "$PRS" ;;
+            "pr view") cat "$VIEW" ;;
+            "pr comment"|"pr close") echo "$2 $3" >> "$LOG" ;;
+            "api repos/"*) cat >> "$SENT" ;;
+            *) echo "unexpected: $*" >&2; exit 1 ;;
+          esac
+          STUB
+          chmod +x "$stub/gh"
+          bot=app/andy-the-messenger-robot
+          marker='{"source":"ccswe-avalonia/CCSWE.Avalonia.Material","version":"12.3.5","packages":["CCSWE.Avalonia.Material"]}'
+          # pr NUMBER BRANCH MERGEABLE [BODY] [AUTHOR] [AUTO_MERGE] [COMMENT]
+          pr() {
+            jq -nc --argjson n "$1" --arg branch "$2" --arg mergeable "$3" --arg body "${4:-Bumps CCSWE.Avalonia.Material from 12.3.4 to 12.3.5}" \
+              --arg author "${5:-$bot}" --argjson auto "${6:-true}" --arg comment "${7:-}" \
+              '{number: $n, headRefName: $branch, mergeable: $mergeable, body: $body, author: {login: $author},
+                title: "Update CCSWE.Avalonia.Material packages to 12.3.5",
+                autoMergeRequest: (if $auto then {} else null end), comments: [{body: $comment}]}'
+          }
+          recover() {
+            jq -s . > "$PRS"; : > "$LOG"; : > "$SENT"
+            PATH="$stub:$PATH" GH_TOKEN=x REPO=o/app OWNER=o DEFAULT_BRANCH=master RETRY_DELAY=0 "$script"
+          }
+          expect() {  # expect LOG DISPATCHES (dispatches as compact JSON lines)
+            [ "$(cat "$LOG")" = "$1" ] || { echo "::error::$name: log ${1@Q} expected, got $(cat "$LOG")"; exit 1; }
+            [ "$(jq -c . "$SENT")" = "$2" ] || { echo "::error::$name: dispatches ${2@Q} expected, got $(cat "$SENT")"; exit 1; }
+          }
+          material=bot/update-dependencies/CCSWE.Avalonia.Material/1-1
+          event() { jq -nc --argjson p "$1" '{event_type: "update-dependencies", client_payload: $p}'; }
+
+          name=marker
+          pr 10 "$material" CONFLICTING $'Bumps X from 1.0.0 to 2.0.0\n\n<!-- update-dependencies '"$marker"' -->' | recover
+          expect "comment 10" "$(event "$marker")"
+
+          name=fallback
+          pr 11 "$material" CONFLICTING | recover
+          expect "comment 11" "$(event '{"source":"o/CCSWE.Avalonia.Material","version":"12.3.5","packages":["CCSWE.Avalonia.Material"]}')"
+
+          name=unknown
+          echo '{"mergeable":"CONFLICTING"}' > "$VIEW"
+          pr 12 "$material" UNKNOWN | recover
+          expect "comment 12" "$(event '{"source":"o/CCSWE.Avalonia.Material","version":"12.3.5","packages":["CCSWE.Avalonia.Material"]}')"
+
+          name=oldest
+          { pr 21 "$material" CONFLICTING; pr 20 "$material" CONFLICTING; } | recover
+          expect "comment 20" "$(event '{"source":"o/CCSWE.Avalonia.Material","version":"12.3.5","packages":["CCSWE.Avalonia.Material"]}')"
+
+          name=skipped
+          {
+            pr 30 "$material" CONFLICTING "" "$bot" true "Re-dispatching. <!-- recovered -->"
+            pr 31 "$material" MERGEABLE
+            pr 32 "$material" CONFLICTING "" "$bot" false
+            pr 33 "$material" CONFLICTING "" app/dependabot
+            pr 34 feature/x CONFLICTING
+          } | recover
+          expect "" ""
+
+          name=nfbot
+          pr 40 nfbot/update-dependencies/abc CONFLICTING | recover
+          expect "close 40" "$(event '{}')"
+
   dependabot:
-    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-tailwind, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale, fixture-release]
+    needs: [actionlint, shellcheck, fixture-gradle, fixture-dotnet-pass, fixture-dotnet-fail, fixture-dotnet-no-tests, fixture-dotnet-library, fixture-dotnet-update, fixture-dotnet-sdk-version, fixture-tailwind, fixture-discover, fixture-android-update, fixture-android-play, fixture-npm-app, fixture-npm-action, fixture-npm-action-stale, fixture-recover-update-prs, fixture-release]
     permissions:
       contents: read
       pull-requests: read

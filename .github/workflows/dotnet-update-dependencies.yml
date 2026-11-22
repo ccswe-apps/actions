@@ -79,6 +79,9 @@ jobs:
             echo "source-name=${SOURCE#*/}"
             echo "version=$VERSION"
             echo "packages=$packages"
+            # Recorded in the PR body, so update-behind can re-dispatch a conflicting PR (recover-update-prs).
+            echo "marker=$(jq -nc --arg source "$SOURCE" --arg version "$VERSION" --argjson packages "$PACKAGES" \
+              '{source: $source, version: $version, packages: $packages}')"
           } >> "$GITHUB_OUTPUT"
 
       - id: app-token
@@ -100,6 +103,25 @@ jobs:
         with:
           packages: ${{ steps.payload.outputs.packages }}
           version: ${{ steps.payload.outputs.version }}
+
+      # Nothing to change (already on the default branch, or a re-dispatch of an older version): close this
+      # source's open update PRs for the same version, e.g. one that conflicted after the change landed.
+      - name: Close up-to-date pull requests
+        if: steps.update.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+          SOURCE_NAME: ${{ steps.payload.outputs.source-name }}
+          VERSION: ${{ steps.payload.outputs.version }}
+        run: |
+          prefix="bot/update-dependencies/${SOURCE_NAME}/"
+          gh pr list -R "$REPO" --state open --limit 100 --json number,headRefName,title |
+            jq -r --arg prefix "$prefix" --arg suffix " to ${VERSION}" \
+              '.[] | select((.headRefName | startswith($prefix)) and (.title | endswith($suffix))) | .number' |
+            while read -r n; do
+              gh pr close "$n" -R "$REPO" --delete-branch --comment "Already up to date on ${BASE}."
+            done
 
       - id: sdk
         if: steps.update.outputs.changed == 'true'
@@ -138,6 +160,7 @@ jobs:
           SOURCE_NAME: ${{ steps.payload.outputs.source-name }}
           VERSION: ${{ steps.payload.outputs.version }}
           SUMMARY: ${{ steps.update.outputs.summary }}
+          MARKER: ${{ steps.payload.outputs.marker }}
           MAJOR: ${{ steps.update.outputs.major }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -151,7 +174,8 @@ jobs:
           git switch -c "$branch"
           git commit -am "$title" -m "$SUMMARY"
           git push origin "$branch"
-          url="$(gh pr create -R "$REPO" --base "$BASE" --head "$branch" --title "$title" --body "$SUMMARY")"
+          body="${SUMMARY}"$'\n\n'"<!-- update-dependencies ${MARKER} -->"
+          url="$(gh pr create -R "$REPO" --base "$BASE" --head "$branch" --title "$title" --body "$body")"
           number="${url##*/}"
 
           gh pr list -R "$REPO" --state open --limit 100 --json number,headRefName \

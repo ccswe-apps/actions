@@ -10,12 +10,12 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 |---|---|
 | `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact, or with `bundle-modules` each module's AAB and R8 mapping as `release-aab`; tests ran on the PR) · `dependabot` |
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
-| `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking) |
+| `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking; see [Update PRs](#update-prs)) |
 | `gradle-dependency-submission.yml` | `submit` (resolves every Gradle configuration, including `buildSrc` and plugin classpaths, and submits the dependency graph for Dependabot alerts; for a weekly `schedule` caller with `contents: write`; see the header) |
 | `dotnet-build-app.yml` | `build` → `publish` (GHCR image, opt-in, on a default-branch push; then prunes old image versions) · `dependabot` |
 | `dotnet-build-library.yml` | `build` (optional `dotnet-validate`) → `publish` (GitHub Packages; when packable files changed; waits until the feed serves them) → `dependents` (dispatch `update-dependencies`) · `dependabot`. With `nuget-org: true`, `publish` (`nuget-org-publish`) and `dependents` are caller jobs; see the header |
 | `dotnet-release-app.yml` | `release` (per-runtime archives as GitHub Release assets, on a version tag) |
-| `dotnet-update-dependencies.yml` | `update` (consumer side of `dependents`: bump, PR, auto-merge unless major) |
+| `dotnet-update-dependencies.yml` | `update` (consumer side of `dependents`: bump, PR, auto-merge unless major; see [Update PRs](#update-prs)) |
 | `nanoframework-build-app.yml` | `build` (Windows) · `package-lock` · `packages-updated` (PRs) · `dependabot` |
 | `nanoframework-build-library.yml` | `build` (Windows, nuspec pack; outputs `publish` when packable files changed) · `package-lock` · `packages-updated` (PRs) · `dependabot`. The caller adds `publish` (`nuget-org-publish`) and `dependents` (`dispatch-dependents.yml`) jobs; see the header |
 | `nanoframework-update-dependencies.yml` | nanodu update PR (cron/dispatch) → `manage-prs` (close superseded, auto-merge unless major) |
@@ -24,7 +24,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 | `release-tag.yml` | on dispatch: `verify` (default branch, every required check passed on the commit, next version) → `release` (tag and GitHub Release) → `major` (move the major tag); see [Releases](#releases) |
 | `move-major-tag.yml` | moves a major tag (e.g. `v2`) with the andy App token; also a manual rollback |
 | `dispatch-dependents.yml` | nested in the GitHub Packages library workflows, a caller job for nuget.org libraries: find dependents, send `update-dependencies` (see [Dependents](#dependents)) |
-| `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` |
+| `dependabot.yml` | `merge` (non-major Dependabot PRs) · `update-behind` (updates behind auto-merge bot PRs; re-dispatches the oldest conflicting bot update PR, `recover-update-prs`) |
 
 The caller shape, inputs and contract are in each workflow's header.
 
@@ -78,6 +78,10 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 
 `android-build-library.yml` reads the published coordinates from each `build/publications/*/pom-default.xml` and, once GitHub Packages serves `maven-metadata.xml` with the new version, sends `packages` as `group:name`. A listener calls `android-update-dependencies.yml`, which sets the matching `[libraries]` entries in `gradle/libs.versions.toml` (their `version.ref` key, or an inline version) and opens a `bot/update-dependencies/<source>/...` PR. It auto-merges unless the bump is breaking: a major change, or a minor change of a 0.x version.
 
+### Update PRs
+
+The .NET and Android updaters never lower a SemVer version (a re-dispatched older update is a no-op). With nothing to change, they close that source's open update PRs for the same version ("Already up to date"). Each PR body ends with an `<!-- update-dependencies {...} -->` marker holding the dispatch payload. When a merge leaves a bot update PR conflicting (two library updates editing adjacent lines), `dependabot.yml`'s `update-behind` runs `recover-update-prs`: for the oldest such PR with auto-merge on, it comments (marking it recovered) and re-sends `update-dependencies` with the marker's payload (or one parsed from the title, branch and `Bumps` lines), so the updater opens a fresh PR from base and supersedes it. One per push, since the updaters' concurrency group keeps a single pending run. A conflicting `nfbot/update-dependencies/*` PR is closed and nanodu re-dispatched.
+
 ## Composite actions
 
 - `dotnet-build`: SDK (`dotnet-sdk-version`), nbgv version, restore, build, then the test projects matching `test-patterns` (excluding tests tagged `[Category("LocalOnly")]`, for those that need an internal network or external sites; VSTest runner), with a test report and TRX artifact. `dotnet-build-app` runs `*.UnitTests.csproj` and `*.IntegrationTests.csproj` (Docker is available for Testcontainers).
@@ -95,6 +99,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `nuget-wait`: waits until a feed's flat container (exact restore) or registration index ("latest") lists every package version.
 - `maven-wait`: waits until a Maven repository's `maven-metadata.xml` lists the version for every artifact.
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
+- `recover-update-prs`: re-dispatches the oldest conflicting bot update PR (see [Update PRs](#update-prs)).
 - `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check (on failure: rebuild and download commands in the error and step summary, and the built output uploaded as an artifact, so fork contributors can commit it).
 - `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact. On GitHub-hosted Linux runners it removes preinstalled toolchains Gradle builds don't use (.NET, GHC, Swift, CodeQL), and before the build it removes restored caches and distributions of other Gradle versions. `cache-read-only: true` forces a read-only Gradle cache; otherwise setup-gradle's default applies (read-only off the default branch). `android-build-app` and `android-build-library` release builds don't save the cache; non-release default-branch pushes refresh it.
 - `version-changed`: whether any watched file changed in the pushed range.
@@ -113,6 +118,7 @@ A name that matches no listener in its account logs `::warning::Update-Dependent
 - `fixture-android-update` (`update-catalog-versions` against `test/fixtures/catalog`)
 - `fixture-android-play` (`android-play-publish --dry-run` on a generated phone and Wear tree)
 - `fixture-npm-app`, `fixture-npm-action`, `fixture-npm-action-stale` (`npm-build` against `test/fixtures/npm`; the stale one also checks the uploaded artifact)
+- `fixture-recover-update-prs` (`recover-update-prs` against a stubbed `gh`)
 - `fixture-release` (`next-release-version` against a generated repo, `required-checks` against a stubbed `gh`)
 
 Inside this repo, workflows reference the composites with `$/` (`uses: $/.github/actions/gradle-build`). That resolves to this repo at the running commit, even when the workflow is called from another owner.
