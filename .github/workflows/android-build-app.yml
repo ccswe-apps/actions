@@ -201,6 +201,7 @@ jobs:
           name: release-apk
           path: ${{ steps.meta.outputs.file-path }}
           if-no-files-found: error
+          retention-days: 14
 
       - id: bundles
         name: Collect bundles
@@ -235,6 +236,7 @@ jobs:
           name: release-aab
           path: ${{ steps.bundles.outputs.path }}
           if-no-files-found: error
+          retention-days: 14
 
       - name: Clean up signing material
         if: always()
