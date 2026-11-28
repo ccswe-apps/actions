@@ -73,3 +73,4 @@ runs:
         name: coverage-report
         path: ${{ inputs.working-directory }}/${{ inputs.coverage-path }}
         if-no-files-found: warn
+        retention-days: 7

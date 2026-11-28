@@ -8,7 +8,7 @@ Owner-specific steps (deploys, distribution) run as extra caller jobs from the o
 
 | Workflow | Jobs |
 |---|---|
-| `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact, or with `bundle-modules` each module's AAB and R8 mapping as `release-aab`; tests ran on the PR) · `dependabot` |
+| `android-build-app.yml` | `build` (on a version-bump push, only the signed APK as the `release-apk` artifact, or with `bundle-modules` each module's AAB and R8 mapping as `release-aab`, kept 14 days; tests ran on the PR) · `dependabot` |
 | `android-build-library.yml` | `build` (on a version-bump push, only `publish` to GitHub Packages Maven and wait until it serves them; tests ran on the PR) → `dependents` · `dependabot` |
 | `android-update-dependencies.yml` | `update` (consumer side of `dependents`: bump `gradle/libs.versions.toml`, PR, auto-merge unless breaking; see [Update PRs](#update-prs)) |
 | `gradle-dependency-submission.yml` | `submit` (resolves every Gradle configuration, including `buildSrc` and plugin classpaths, and submits the dependency graph for Dependabot alerts; for a weekly `schedule` caller with `contents: write`; see the header) |
@@ -101,7 +101,7 @@ The .NET and Android updaters never lower a SemVer version (a re-dispatched olde
 - `update-catalog-versions`: sets Maven libraries to one version in a Gradle version catalog.
 - `recover-update-prs`: re-dispatches the oldest conflicting bot update PR (see [Update PRs](#update-prs)).
 - `npm-build`: Node from `.nvmrc`, `npm ci`, then `npm run format:check`, `lint`, `test` (if present) and `build`; optional build env and committed-output check (on failure: rebuild and download commands in the error and step summary, and the built output uploaded as an artifact, so fork contributors can commit it).
-- `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact. On GitHub-hosted Linux runners it removes preinstalled toolchains Gradle builds don't use (.NET, GHC, Swift, CodeQL), and before the build it removes restored caches and distributions of other Gradle versions. `cache-read-only: true` forces a read-only Gradle cache; otherwise setup-gradle's default applies (read-only off the default branch). `android-build-app` and `android-build-library` release builds don't save the cache; non-release default-branch pushes refresh it.
+- `gradle-build`: JDK (Temurin) and Gradle setup, CI `gradle.properties` lines (appended), the wrapper run, and an optional coverage artifact (kept 7 days). On GitHub-hosted Linux runners it removes preinstalled toolchains Gradle builds don't use (.NET, GHC, Swift, CodeQL), and before the build it removes restored caches and distributions of other Gradle versions. `cache-read-only: true` forces a read-only Gradle cache; otherwise setup-gradle's default applies (read-only off the default branch). `android-build-app` and `android-build-library` release builds don't save the cache; non-release default-branch pushes refresh it.
 - `version-changed`: whether any watched file changed in the pushed range.
 - `next-release-version`, `required-checks`: the next `vX.Y.Z` tag, and the gate that every required check passed on a commit (`release-tag.yml`).
 
